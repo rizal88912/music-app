@@ -63,23 +63,6 @@ const isBadMix = (title) => {
   return badMixWords.some(w => t.includes(w));
 };
 
-// 🔥 FUNGSI TAMENG MEMORI (ANTI WHITE SCREEN) 🔥
-const getLocalArray = (key) => {
-  try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) : [];
-  } catch (error) { return []; }
-};
-const getLocalBool = (key) => {
-  try {
-      const item = localStorage.getItem(key);
-      return item ? JSON.parse(item) === true : false;
-  } catch (error) { return false; }
-};
-const setLocal = (key, val) => {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch (error) {}
-};
-
 function MainApp() {
   const { currentSong, isPlaying, togglePlay, playNext, playPrev, playSong, queue, currentIndex } = usePlayerStore();
   const location = useLocation();
@@ -99,27 +82,37 @@ function MainApp() {
   const [textSuggestions, setTextSuggestions] = useState([]);
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
   
-  const [searchHistory, setSearchHistory] = useState(() => getLocalArray('ytm_search_history'));
+  const [searchHistory, setSearchHistory] = useState(() => {
+    const saved = localStorage.getItem('ytm_search_history');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const iframeRef = useRef(null);
   
-  // 🔥 INI DIA YANG BIKIN CRASH KEMAREN (SEKARANG UDAH ADA LAGI!) 🔥
+  // 🔥 AUDIO ENGINE MURNI 🔥
   const audioRef = useRef(null);
   const getActiveAudio = () => audioRef.current;
-  const keepAliveAudioRef = useRef(null);
   
+  // 🔥 ALWAYS-ON SILENT ENGINE 🔥
+  const keepAliveAudioRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const isSeekingRef = useRef(false);
+  
+  const nextAudioUrlRef = useRef(null);
+  const preloadedBlobUrlRef = useRef(null);
   const API_BASE = "https://music-app-production-3507.up.railway.app";
 
   const adzanPausedTimeRef = useRef(0);
   const adzanEndTimeRef = useRef(0);
+  const adzanOriginalLoopRef = useRef(false);
   const workerRef = useRef(null); 
   
   const [currentTime, setCurrentTime] = useState(0);
   const currentTimeRef = useRef(0);
   const [duration, setDuration] = useState(0); 
   const [isDragging, setIsDragging] = useState(false);
+  
+  const [audioStreamUrl, setAudioStreamUrl] = useState(null);
   const [isBuffering, setIsBuffering] = useState(false);
 
   const [lyrics, setLyrics] = useState([]);
@@ -139,7 +132,7 @@ function MainApp() {
   const [toastMsg, setToastMsg] = useState("");
   const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, song: null });
 
-  const [adzanMode, setAdzanMode] = useState(() => getLocalBool('ytm_adzan_mode'));
+  const [adzanMode, setAdzanMode] = useState(() => JSON.parse(localStorage.getItem('ytm_adzan_mode') || 'false'));
   const [prayerTimes, setPrayerTimes] = useState([]); 
   const [activePrayerName, setActivePrayerName] = useState(null); 
   
@@ -153,39 +146,41 @@ function MainApp() {
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // 🔥 WIDGET SINKRON LOCKSCREEN 🔥
-  const updateMediaSession = (song) => {
-    if (!('mediaSession' in navigator) || !window.MediaMetadata || !song) return;
+  // 🔥 JURUS DEWA BLOB MEMORY: JANGAN ADA JEDA WALAUPUN 1 MILIDETIK 🔥
+  useEffect(() => {
+      if (queue.length === 0) return;
+      let nextIdx = currentIndex + 1;
+      if (isShuffle) nextIdx = Math.floor(Math.random() * queue.length);
+      const nextSong = queue[nextIdx];
 
-    let a = song.artist || "Artis";
-    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
-    if (!a || a.toLowerCase() === 'youtube') if (song.title && song.title.includes('-')) a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
-    
-    let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-    if (t.includes('-')) {
-       let parts = t.split('-');
-       if (parts[0].toLowerCase().includes(a.toLowerCase())) t = parts.slice(1).join('-');
-       else if (parts[1] && parts[1].toLowerCase().includes(a.toLowerCase())) t = parts[0];
-       else t = parts.slice(1).join('-');
-    }
-    t = t.trim() || song.title;
-
-    try {
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: t,
-          artist: a,
-          album: 'RnCmusic Premium',
-          artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
-        });
-        navigator.mediaSession.playbackState = 'playing';
-        document.title = `${t} - ${a}`;
-    } catch(e) {}
-  };
+      if (nextSong) {
+          const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
+          
+          // Diam-diam download lagu di background ke RAM biar HP gak usah loading lagi pas ganti
+          fetch(originalUrl)
+            .then(res => res.blob())
+            .then(blob => {
+                if (preloadedBlobUrlRef.current) {
+                    URL.revokeObjectURL(preloadedBlobUrlRef.current); // Bersihin RAM lama
+                }
+                const blobUrl = URL.createObjectURL(blob); // Sulap jadi link memori lokal
+                preloadedBlobUrlRef.current = blobUrl;
+                nextAudioUrlRef.current = blobUrl; 
+            })
+            .catch(() => {
+                nextAudioUrlRef.current = originalUrl; // Kalau gagal, tetep pake link biasa
+            });
+      } else {
+          nextAudioUrlRef.current = null;
+      }
+  }, [currentIndex, queue, isShuffle, API_BASE]);
 
   useEffect(() => {
       if ('serviceWorker' in navigator) {
           navigator.serviceWorker.ready.then(registration => {
-              registration.addEventListener('updatefound', () => { setUpdateAvailable(true); });
+              registration.addEventListener('updatefound', () => {
+                  setUpdateAvailable(true);
+              });
           });
       }
   }, []);
@@ -232,12 +227,11 @@ function MainApp() {
 
   useEffect(() => {
       const unlockAudio = () => {
+          const active = getActiveAudio();
           const silent = keepAliveAudioRef.current;
+          if (active && active.paused && !currentSong?.id) active.play().then(() => active.pause()).catch(() => {});
           if (silent && silent.paused) silent.play().then(() => silent.pause()).catch(() => {});
           
-          const active = getActiveAudio();
-          if (active && active.paused && !currentSong?.id) active.play().then(()=> active.pause()).catch(()=>{});
-
           document.removeEventListener('click', unlockAudio);
           document.removeEventListener('touchstart', unlockAudio);
       };
@@ -265,13 +259,14 @@ function MainApp() {
           if (mediaModeRef.current === 'video') {
               usePlayerStore.setState({ isPlaying: true });
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+              showToast('▶️ Waktu Adzan selesai. Melanjutkan video...');
               if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           } else {
               if (active) {
                   active.muted = false;
                   active.volume = 1;
+                  active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
-                  active.play().catch(()=>{});
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
@@ -296,9 +291,13 @@ function MainApp() {
           } else {
               if (active) {
                   adzanPausedTimeRef.current = active.currentTime;
-                  active.pause();
+                  adzanOriginalLoopRef.current = active.loop;
+                  active.muted = true;
+                  active.volume = 0;
+                  active.loop = true; 
               }
           }
+          if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -326,7 +325,7 @@ function MainApp() {
   };
 
   useEffect(() => {
-    setLocal('ytm_adzan_mode', adzanMode);
+    localStorage.setItem('ytm_adzan_mode', JSON.stringify(adzanMode));
     if (adzanMode) {
         showToast("⏳ Meminta akses lokasi akurat...");
         const fetchByCity = (city) => {
@@ -350,7 +349,10 @@ function MainApp() {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => fetchByCoords(position.coords.latitude, position.coords.longitude),
-                (error) => { fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta')); }, { timeout: 10000 }
+                (error) => {
+                    console.log("GPS ditolak/gagal, pakai IP (Backup)");
+                    fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
+                }, { timeout: 10000 }
             );
         } else {
             fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
@@ -391,24 +393,49 @@ function MainApp() {
     return () => { worker.postMessage({ cmd: 'stop' }); worker.terminate(); };
   }, [adzanMode, prayerTimes]);
 
-  // 🔥 FUNGSI PEMUTAR ANTI-MUTER/ANTI-LOADING ABADI 🔥
-  const executePlay = (activeEl, songObj) => {
-      if (!activeEl || !songObj) return;
-      setIsBuffering(true);
-      activeEl.src = `${API_BASE}/api/audio?id=${songObj.id}`;
-      activeEl.load();
-      
-      const playPromise = activeEl.play();
-      if (playPromise !== undefined) {
-          playPromise.then(() => {
-              usePlayerStore.setState({ isPlaying: true });
-          }).catch((err) => {
-              console.warn("Autoplay dicegat browser:", err);
-              setIsBuffering(false);
-              usePlayerStore.setState({ isPlaying: false });
-          });
-      }
-      updateMediaSession(songObj);
+  const loadAudioSource = async (audioEl, songId, autoPlay = false) => {
+    if (!audioEl || !songId) return;
+    
+    isTransitioningRef.current = true;
+    const originalUrl = `${API_BASE}/api/audio?id=${songId}`;
+    
+    // Gak pake blob lagi, langsung pakai URL aslinya biar enteng di RAM
+    audioEl.src = originalUrl;
+    
+    audioEl.load();
+    if (autoPlay && !isAdzanPlayingRef.current) {
+        audioEl.play().then(() => {
+            usePlayerStore.setState({ isPlaying: true });
+            isTransitioningRef.current = false;
+        }).catch(()=>{ isTransitioningRef.current = false; });
+    } else {
+        isTransitioningRef.current = false;
+    }
+  };
+
+  // 🔥 TAMBAHAN INJEKSI METADATA WIDGET 🔥
+  const updateMediaSession = (song) => {
+    if (!('mediaSession' in navigator) || !song) return;
+    let a = song.artist || "Artis";
+    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
+    if (!a || a.toLowerCase() === 'youtube') if (song.title && song.title.includes('-')) a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+    let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    if (t.includes('-')) {
+       let parts = t.split('-');
+       if (parts[0].toLowerCase().includes(a.toLowerCase())) t = parts.slice(1).join('-');
+       else if (parts[1] && parts[1].toLowerCase().includes(a.toLowerCase())) t = parts[0];
+       else t = parts.slice(1).join('-');
+    }
+    t = t.trim() || song.title;
+
+    // Paksa update UI widget iOS/Android
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t,
+      artist: a,
+      album: 'RnCmusic Premium',
+      artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
+    });
+    navigator.mediaSession.playbackState = 'playing';
   };
 
   const handleNextLocal = (e) => {
@@ -416,39 +443,43 @@ function MainApp() {
       if (dismissAdzanIfActive()) return; 
 
       isTransitioningRef.current = true;
+
       const st = usePlayerStore.getState();
       let nextIdx = st.currentIndex + 1;
-      const safeQueue = st.queue || [];
-      
-      if (isShuffle) nextIdx = Math.floor(Math.random() * (safeQueue.length || 1));
-      const nextSong = safeQueue[nextIdx];
+      if (isShuffle) nextIdx = Math.floor(Math.random() * st.queue.length);
+      const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
-          executePlay(getActiveAudio(), nextSong);
-          st.playNext(isShuffle);
-      } else {
-          isTransitioningRef.current = false;
-      }
+          updateMediaSession(nextSong); // Suntik judul widget baru!
+          const active = getActiveAudio();
+          if (active) {
+              active.src = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
+              active.play().finally(() => { 
+                  isTransitioningRef.current = false; 
+              }).catch(()=>{ isTransitioningRef.current = false; });
+          } else { isTransitioningRef.current = false; }
+      } else { isTransitioningRef.current = false; }
+      
+      st.playNext(isShuffle);
   };
 
   const handlePrevLocal = (e) => {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
-
       if (currentTime > 3) {
           handleSeek({ target: { value: 0 } });
       } else {
           isTransitioningRef.current = true;
+          
+          // Suntik judul widget lagu sebelumnya
           const st = usePlayerStore.getState();
           const prevIdx = st.currentIndex - 1;
-          const safeQueue = st.queue || [];
-          
-          if (prevIdx >= 0 && safeQueue[prevIdx]) {
-              executePlay(getActiveAudio(), safeQueue[prevIdx]);
-              st.playPrev();
-          } else {
-              isTransitioningRef.current = false;
+          if(prevIdx >= 0 && st.queue[prevIdx]) {
+             updateMediaSession(st.queue[prevIdx]);
           }
+
+          usePlayerStore.getState().playPrev();
+          setTimeout(() => { isTransitioningRef.current = false; }, 1000);
       }
   };
 
@@ -456,27 +487,21 @@ function MainApp() {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
 
-      const active = getActiveAudio();
-      if (!active) return;
-
       if (isPlaying) {
-          active.pause();
+          getActiveAudio()?.pause();
+          // Pause manual gak apa-apa, tapi kalau mati sendiri karena lagu habis jangan di pause
+          if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
       } else {
-          if (currentSong && !active.src.includes(currentSong.id)) {
-              executePlay(active, currentSong);
+          const active = getActiveAudio();
+          if (active && currentSong && !active.src.includes(currentSong.id)) {
+              loadAudioSource(active, currentSong.id, true);
           } else {
-              const playPromise = active.play();
-              if (playPromise !== undefined) {
-                  playPromise.then(() => {
-                      usePlayerStore.setState({ isPlaying: true });
-                      if (currentSong) updateMediaSession(currentSong);
-                  }).catch(() => {
-                      setIsBuffering(false);
-                      usePlayerStore.setState({ isPlaying: false });
-                  });
-              }
+              active?.play().then(() => {
+                  usePlayerStore.setState({ isPlaying: true });
+                  if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{}); 
+              }).catch(()=>{});
           }
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
           togglePlay();
@@ -491,9 +516,8 @@ function MainApp() {
           setIsExpanded(true); 
           return; 
       }
-      
-      executePlay(getActiveAudio(), qSong);
-      usePlayerStore.getState().playSong(qSong, queue || [], idx);
+      updateMediaSession(qSong); // Suntik judul widget
+      usePlayerStore.getState().playSong(qSong, queue, idx);
       setIsExpanded(true); 
   };
 
@@ -508,7 +532,10 @@ function MainApp() {
       
       let cleanQueue = [];
       let usedTitles = new Set();
-      let baseTitle = (song.title || '').toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/(official|lyric|lyrics|audio|video|music|8d|cover|remix|live|sped up|slowed|reverb)/gi, '').trim();
+      let baseTitle = (song.title || '').toLowerCase()
+          .replace(/[^a-z0-9\s]/gi, '')
+          .replace(/(official|lyric|lyrics|audio|video|music|8d|cover|remix|live|sped up|slowed|reverb)/gi, '')
+          .trim();
       usedTitles.add(baseTitle);
       cleanQueue.push(song); 
 
@@ -522,7 +549,7 @@ function MainApp() {
         });
       }
 
-      executePlay(getActiveAudio(), song);
+      updateMediaSession(song); // Suntik judul widget
 
       if (cleanQueue.length <= 3) {
           usePlayerStore.getState().playSong(song, cleanQueue, 0);
@@ -536,16 +563,16 @@ function MainApp() {
   const handleSeek = (e) => {
     dismissAdzanIfActive(); 
     isSeekingRef.current = true;
+    
     const seekTime = parseFloat(e.target.value);
     setCurrentTime(seekTime);
     currentTimeRef.current = seekTime;
-    
     const active = getActiveAudio();
     if (active) active.currentTime = seekTime;
-    
     if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [seekTime, true] }), '*');
     }
+
     setTimeout(() => { isSeekingRef.current = false; }, 1000);
   };
 
@@ -561,10 +588,10 @@ function MainApp() {
           if (!response.ok) throw new Error("Gagal mengambil file audio");
           await cache.put(audioUrl, response.clone());
       }
-      const downloaded = getLocalArray('ytm_downloaded_songs');
+      const downloaded = JSON.parse(localStorage.getItem('ytm_downloaded_songs') || '[]');
       if (!downloaded.some(s => s.id === songToDownload.id)) {
           downloaded.unshift(songToDownload);
-          setLocal('ytm_downloaded_songs', downloaded);
+          localStorage.setItem('ytm_downloaded_songs', JSON.stringify(downloaded));
           window.dispatchEvent(new Event('downloadedSongsUpdated'));
       }
       showToast(`✅ Tersimpan di Pustaka Web: ${songToDownload.title}`);
@@ -595,9 +622,8 @@ function MainApp() {
 
   const handleMenuPlayNext = () => {
       const st = usePlayerStore.getState();
-      const safeQueue = st.queue || [];
-      if (safeQueue[st.currentIndex + 1]?.id !== contextMenu.song?.id && contextMenu.song) {
-          const newQ = [...safeQueue];
+      if (st.queue[st.currentIndex + 1]?.id !== contextMenu.song.id) {
+          const newQ = [...st.queue];
           newQ.splice(st.currentIndex + 1, 0, contextMenu.song);
           usePlayerStore.setState({ queue: newQ });
           showToast("Lagu akan diputar selanjutnya");
@@ -611,20 +637,17 @@ function MainApp() {
 
   const handleMenuAddToQueue = () => {
       const st = usePlayerStore.getState();
-      if (contextMenu.song) {
-          usePlayerStore.setState({ queue: [...(st.queue || []), contextMenu.song] });
-          showToast("Ditambahkan ke antrean");
-      }
+      usePlayerStore.setState({ queue: [...st.queue, contextMenu.song] });
+      showToast("Ditambahkan ke antrean");
       if (st.repeatMode === 'one') usePlayerStore.setState({ repeatMode: 'all' });
       setContextMenu(p => ({...p, isOpen: false}));
   };
 
   const handleMenuLike = () => {
-      if (!contextMenu.song) return;
-      const likedSongs = getLocalArray('ytm_liked_songs');
+      const likedSongs = JSON.parse(localStorage.getItem('ytm_liked_songs') || '[]');
       if (!likedSongs.some(s => s.id === contextMenu.song.id)) {
           likedSongs.unshift(contextMenu.song);
-          setLocal('ytm_liked_songs', likedSongs);
+          localStorage.setItem('ytm_liked_songs', JSON.stringify(likedSongs));
           window.dispatchEvent(new Event('likedSongsUpdated'));
           showToast("Berhasil ditambahkan ke Lagu yang Disukai");
       }
@@ -636,13 +659,296 @@ function MainApp() {
       setContextMenu(p => ({...p, isOpen: false}));
   };
 
-  // 🔥 MURNI UNTUK UPDATE UI (Tidak menyentuh audio play lagi biar gak muter-muter) 🔥
   useEffect(() => {
-    if (!currentSong?.id) { setIsLiked(false); return; }
+    if (!currentSong || !currentSong.id) return;
+    let playHistory = JSON.parse(localStorage.getItem('ytm_play_history') || '[]');
+    playHistory = playHistory.filter(s => s.id !== currentSong.id);
+    const songToSave = { id: currentSong.id, title: currentSong.title, artist: currentSong.artist, image: currentSong.image, url: `https://www.youtube.com/watch?v=${currentSong.id}` };
+    playHistory.unshift(songToSave);
+    playHistory = playHistory.slice(0, 24); 
+    localStorage.setItem('ytm_play_history', JSON.stringify(playHistory));
+    window.dispatchEvent(new Event('historyUpdated'));
+  }, [currentSong?.id]);
 
-    setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
+  const toggleLike = (e) => {
+    if (e) e.stopPropagation();
+    if (!currentSong?.id) return;
+    const likedSongs = JSON.parse(localStorage.getItem('ytm_liked_songs') || '[]');
+    let newLikedSongs;
+    if (isLiked) {
+        newLikedSongs = likedSongs.filter(song => song.id !== currentSong.id);
+        showToast("Dihapus dari Lagu Disukai");
+    } else {
+        const songToSave = { id: currentSong.id, title: currentSong.title, artist: currentSong.artist, image: currentSong.image };
+        if (!likedSongs.some(s => s.id === currentSong.id)) newLikedSongs = [songToSave, ...likedSongs];
+        else newLikedSongs = likedSongs;
+        showToast("Ditambahkan ke Lagu Disukai");
+    }
+    localStorage.setItem('ytm_liked_songs', JSON.stringify(newLikedSongs));
+    setIsLiked(!isLiked);
+    window.dispatchEvent(new Event('likedSongsUpdated'));
+  };
 
-    const likedSongs = getLocalArray('ytm_liked_songs');
+  const generateRadioMix = async (baseSong) => {
+    if(!baseSong) return;
+    let realTitle = baseSong.title || "";
+    let realArtist = baseSong.artist || "Official";
+    if (realTitle.includes('-')) {
+        const parts = realTitle.split('-');
+        realArtist = parts[0].trim();
+        realTitle = parts[1].trim();
+    }
+    let cleanTitle = realTitle.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/(official|lyric|lyrics|audio|video|music|cover|remix)/gi, '').trim();
+    let cleanArtist = realArtist.split(/feat\.|ft\.| x |,|\||-|•/i)[0].replace(/(official|vevo|channel|music|records)/gi, '').trim();
+    if (!cleanArtist || cleanArtist.toLowerCase() === 'youtube') cleanArtist = "Pop Hits";
+
+    const cacheKey = `algomix_smart_v5_${cleanTitle}_${cleanArtist}`;
+    const cachedMix = sessionStorage.getItem(cacheKey);
+    if (cachedMix) {
+        const parsedMix = JSON.parse(cachedMix);
+        usePlayerStore.setState(state => {
+            const existingIds = new Set(state.queue.map(q => q.id));
+            const newUnique = parsedMix.filter(m => !existingIds.has(m.id));
+            if (newUnique.length === 0) return state; 
+            return { queue: [...state.queue, ...newUnique] }; 
+        });
+        return;
+    }
+
+    const dangdutArr = ["Rhoma Irama", "Meggy Z", "Evie Tamala", "Elvy Sukaesih", "Rita Sugiarto", "Mansyur S", "Caca Handika", "Asep Irama", "Imam S Arifin", "Dangdut", "Koplo", "Monata", "Pallapa"];
+    const indoPopArr = ["Mahalini", "Bernadya", "Hindia", "Tiara Andini", "Sal Priadi", "Kunto Aji", "Nadin Amizah", "Pamungkas", "Yura Yunita", "Maliq & D'Essentials", "Juicy Luicy", "Rizky Febian", "Tulus", "Lyodra", "Sheila On 7", "D'Masiv", "Noah"];
+    const baratPopArr = ["Taylor Swift", "The Weeknd", "Bruno Mars", "Ariana Grande", "Justin Bieber", "Post Malone", "Dua Lipa", "Coldplay", "Ed Sheeran", "Sabrina Carpenter", "Billie Eilish", "Charlie Puth", "Benson Boone"];
+    const rockArr = ["Linkin Park", "Nirvana", "Green Day", "Guns N' Roses", "Queen", "Muse", "Oasis", "Arctic Monkeys", "Bon Jovi"];
+
+    const baseIsDangdut = dangdutArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()) || cleanTitle.toLowerCase().includes(a.toLowerCase()));
+    const baseIsBarat = baratPopArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()));
+    const baseIsRock = rockArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()));
+
+    let queryPool = [ `"${cleanArtist}" official audio`, `${cleanArtist} lagu terbaik official` ]; 
+    
+    if (baseIsDangdut) {
+        const randomHits = dangdutArr.sort(() => 0.5 - Math.random()).slice(0, 2);
+        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" lagu original`);
+    } else if (baseIsBarat) {
+        const randomHits = baratPopArr.sort(() => 0.5 - Math.random()).slice(0, 2);
+        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" official audio`);
+    } else if (baseIsRock) {
+        const randomHits = rockArr.sort(() => 0.5 - Math.random()).slice(0, 2);
+        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" official audio`);
+    } else {
+        const randomHits = indoPopArr.sort(() => 0.5 - Math.random()).slice(0, 2);
+        queryPool.push(`${cleanArtist} mix official`, `"${randomHits[0]}" official audio`);
+    }
+
+    try {
+        const responses = await Promise.all(queryPool.map(q => fetch(`https://api.siputzx.my.id/api/s/youtube?query=${encodeURIComponent(q)}`)));
+        const datasets = await Promise.all(responses.map(r => r.json()));
+        let combined = [];
+        datasets.forEach(d => { if(d.status && d.data) combined = [...combined, ...d.data.sort(() => 0.5 - Math.random())]; });
+        
+        let mix = [];
+        let usedIds = new Set([baseSong.id]); 
+        let usedTitles = new Set([cleanTitle.toLowerCase()]);
+        let uploaderCount = {}; 
+
+        combined.filter(t => t.type === 'video' && !isBadMix(t.title)).forEach(t => {
+            const validId = t.id || t.videoId || (t.url ? t.url.split('v=')[1] : null);
+            if (!validId || usedIds.has(validId)) return;
+            
+            let tCleanT = t.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+            if (tCleanT.includes('-')) tCleanT = tCleanT.split('-')[1];
+            tCleanT = tCleanT.trim();
+
+            let titleCheck = tCleanT.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/(official|lyric|audio|video|music|cover|remix|live)/gi, '').trim();
+            const isThisSongDangdut = dangdutArr.some(a => tCleanT.toLowerCase().includes(a.toLowerCase()) || (t.author?.name || '').toLowerCase().includes(a.toLowerCase()) || tCleanT.toLowerCase().includes('dangdut'));
+            if (!baseIsDangdut && isThisSongDangdut) return;
+            if (baseIsDangdut && baratPopArr.some(a => (t.author?.name || '').toLowerCase().includes(a.toLowerCase()))) return;
+
+            if (titleCheck.length > 3) {
+                let isDup = Array.from(usedTitles).some(seen => seen.includes(titleCheck) || titleCheck.includes(seen));
+                if (isDup) return; 
+                usedTitles.add(titleCheck);
+            }
+
+            let uploaderName = t.author?.name || 'YouTube';
+            let uploaderLow = uploaderName.toLowerCase();
+            if (uploaderLow.includes('ringtone') || uploaderLow.includes('dj ') || uploaderLow.includes('karaoke')) return;
+            if (uploaderCount[uploaderName] >= 2) return;
+            uploaderCount[uploaderName] = (uploaderCount[uploaderName] || 0) + 1;
+
+            mix.push({ id: validId, title: tCleanT, artist: uploaderName.replace(/ - Topic/gi, '').trim(), image: t.thumbnail });
+            usedIds.add(validId);
+        });
+
+        mix.sort((a, b) => (a.artist.toLowerCase().includes(cleanArtist.toLowerCase()) ? -1 : 1) - (b.artist.toLowerCase().includes(cleanArtist.toLowerCase()) ? -1 : 1));
+        mix = mix.slice(0, 25);
+        if (mix.length > 0) {
+            sessionStorage.setItem(cacheKey, JSON.stringify(mix)); 
+            usePlayerStore.setState(state => {
+                const existingIds = new Set(state.queue.map(q => q.id));
+                const newUnique = mix.filter(m => !existingIds.has(m.id));
+                return { queue: [...state.queue, ...newUnique] }; 
+            });
+        }
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    if (!currentSong || queue.length === 0) return;
+    if (queue.length - 1 - currentIndex <= 2) generateRadioMix(currentSong);
+  }, [currentSong?.id, currentIndex, queue.length]);
+
+  useEffect(() => {
+    if (location.pathname !== '/search') {
+      setSearchQuery(''); setShowSearchHistory(false);
+    } else {
+      const params = new URLSearchParams(location.search);
+      if (params.get('q')) setSearchQuery(params.get('q'));
+    }
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (searchQuery.trim().length > 2) {
+        setIsFetchingSuggestions(true);
+        const qLower = searchQuery.trim().toLowerCase();
+        const cacheKey = `search_smart_${qLower}`;
+        const cachedSearch = sessionStorage.getItem(cacheKey);
+
+        if (cachedSearch) {
+            const { texts, lives } = JSON.parse(cachedSearch);
+            setTextSuggestions(texts); setLiveSuggestions(lives); setIsFetchingSuggestions(false);
+            return;
+        }
+        if (isOffline) { setIsFetchingSuggestions(false); return; }
+
+        try {
+          const queryPintar = encodeURIComponent(searchQuery.trim());
+          const response = await fetch(`https://api.siputzx.my.id/api/s/youtube?query=${queryPintar}`);
+          const resData = await response.json();
+          if (resData.status && resData.data) {
+            let formattedResults = resData.data.filter(item => item.type === 'video' && !isNonMusic(item.title)).map(track => {
+                const validId = track.id || track.videoId || (track.url ? track.url.split('v=')[1] : null);
+                let cleanT = track.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/(official|music video|lyric|lyrics|audio|hq|hd|live|performance|remix)/gi, '').replace(/- -/g, '-').replace(/\s+/g, ' ').trim(); 
+                let cleanA = (track.author?.name || 'YouTube').replace(/vevo|official|topic|music|channel|records/gi, '').trim();
+                return { id: validId, title: cleanT, artist: cleanA, image: track.thumbnail };
+              }).filter(track => track.id != null);
+
+            const uniqueTexts = new Set();
+            formattedResults.forEach(track => {
+              let t = track.title.toLowerCase().replace(/[^a-z0-9\s-]/gi, '').trim();
+              if (t.length > 2) uniqueTexts.add(t);
+            });
+            const finalTexts = [qLower, ...Array.from(uniqueTexts).filter(t => t !== qLower)].slice(0, 6);
+            const finalLives = formattedResults.slice(0, 4);
+
+            setTextSuggestions(finalTexts); setLiveSuggestions(finalLives); 
+            sessionStorage.setItem(cacheKey, JSON.stringify({ texts: finalTexts, lives: finalLives }));
+          }
+        } catch (error) {} finally { setIsFetchingSuggestions(false); }
+      } else { setLiveSuggestions([]); setTextSuggestions([]); }
+    }, 500); 
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery, isOffline]); 
+
+  const executeSearch = (query) => {
+    const q = query.trim();
+    if (!q) return;
+    setSearchQuery(q); 
+    const newHistory = [q, ...searchHistory.filter(item => item !== q)].slice(0, 10);
+    setSearchHistory(newHistory);
+    localStorage.setItem('ytm_search_history', JSON.stringify(newHistory));
+    navigate(`/search?q=${encodeURIComponent(q)}`);
+    setShowSearchHistory(false);
+  };
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault(); 
+    if (isOffline) { showToast("🔴 Mode Offline: Tidak bisa melakukan pencarian lagu baru."); return; }
+    executeSearch(searchQuery);
+    if (document.activeElement) document.activeElement.blur(); 
+  };
+
+  const removeSearchHistory = (itemToRemove) => {
+    const newHistory = searchHistory.filter(item => item !== itemToRemove);
+    setSearchHistory(newHistory);
+    localStorage.setItem('ytm_search_history', JSON.stringify(newHistory));
+  };
+
+  const displayArtist = useMemo(() => {
+    if (!currentSong) return "Artis";
+    let a = currentSong.artist || "";
+    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
+    if (!a || a.toLowerCase() === 'youtube') if (currentSong.title && currentSong.title.includes('-')) a = currentSong.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    return a.trim() || "Artis";
+  }, [currentSong]);
+
+  const displayTitle = useMemo(() => {
+    if (!currentSong?.title) return "Pilih Lagu";
+    let t = currentSong.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    if (t.includes('-')) {
+       let parts = t.split('-');
+       let artistName = displayArtist.toLowerCase();
+       if (parts[0].toLowerCase().includes(artistName)) t = parts.slice(1).join('-'); 
+       else if (parts[1] && parts[1].toLowerCase().includes(artistName)) t = parts[0];
+       else t = parts.slice(1).join('-');
+    }
+    return t.trim() || currentSong.title;
+  }, [currentSong, displayArtist]);
+
+  const handleIframeLoad = () => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'listening' }), '*');
+      const active = getActiveAudio();
+      if (active) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [active.currentTime, true] }), '*');
+      if (mediaMode === 'audio') {
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'mute', args: [] }), '*');
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+      } else {
+          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+          if (isPlaying && !isAdzanPlayingRef.current) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+      }
+    }
+  };
+
+  useEffect(() => {
+      const syncMedia = () => {
+          if (!iframeRef.current?.contentWindow) return;
+          if (isAdzanPlayingRef.current) {
+              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+              return; 
+          }
+          const active = getActiveAudio();
+          if (mediaMode === 'audio') {
+              if (active) active.muted = false;
+              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+          } else {
+              if (active) active.muted = true;
+              if (active) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [active.currentTime, true] }), '*');
+              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
+              if (isPlaying) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+              else iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+          }
+      };
+      syncMedia();
+      const t1 = setTimeout(syncMedia, 500);
+      return () => { clearTimeout(t1); };
+  }, [mediaMode, isPlaying, currentSong?.id]);
+
+  useEffect(() => {
+    if (!currentSong?.id) { setIsLiked(false); setAudioStreamUrl(null); return; }
+
+    const activeAudio = getActiveAudio();
+    // Kalau lagunya BUKAN lagu yang baru di-set dari handleNextLocal, baru kita set
+    if (activeAudio && !activeAudio.src.includes(currentSong.id)) {
+        setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
+        setIsBuffering(true);
+        activeAudio.src = `${API_BASE}/api/audio?id=${currentSong.id}`;
+        activeAudio.load();
+        if (isPlaying && !isAdzanPlayingRef.current) activeAudio.play().catch(()=>{});
+    }
+
+    const likedSongs = JSON.parse(localStorage.getItem('ytm_liked_songs') || '[]');
     setIsLiked(likedSongs.some(song => song.id === currentSong.id));
 
     if (currentSong?.title) {
@@ -719,267 +1025,7 @@ function MainApp() {
       };
       searchAPI();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSong?.id, isOffline]);
-
-  useEffect(() => {
-    if (!currentSong || !currentSong.id) return;
-    let playHistory = getLocalArray('ytm_play_history');
-    playHistory = playHistory.filter(s => s.id !== currentSong.id);
-    const songToSave = { id: currentSong.id, title: currentSong.title, artist: currentSong.artist, image: currentSong.image, url: `https://www.youtube.com/watch?v=${currentSong.id}` };
-    playHistory.unshift(songToSave);
-    playHistory = playHistory.slice(0, 24); 
-    setLocal('ytm_play_history', playHistory);
-    window.dispatchEvent(new Event('historyUpdated'));
-  }, [currentSong?.id]);
-
-  const generateRadioMix = async (baseSong) => {
-    if(!baseSong) return;
-    let realTitle = baseSong.title || "";
-    let realArtist = baseSong.artist || "Official";
-    if (realTitle.includes('-')) {
-        const parts = realTitle.split('-');
-        realArtist = parts[0].trim();
-        realTitle = parts[1].trim();
-    }
-    let cleanTitle = realTitle.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/(official|lyric|lyrics|audio|video|music|cover|remix)/gi, '').trim();
-    let cleanArtist = realArtist.split(/feat\.|ft\.| x |,|\||-|•/i)[0].replace(/(official|vevo|channel|music|records)/gi, '').trim();
-    if (!cleanArtist || cleanArtist.toLowerCase() === 'youtube') cleanArtist = "Pop Hits";
-
-    const cacheKey = `algomix_smart_v5_${cleanTitle}_${cleanArtist}`;
-    const cachedMix = sessionStorage.getItem(cacheKey);
-    if (cachedMix) {
-        const parsedMix = safeParse(cachedMix, []);
-        if (parsedMix.length > 0) {
-            usePlayerStore.setState(state => {
-                const existingIds = new Set((state.queue || []).map(q => q.id));
-                const newUnique = parsedMix.filter(m => !existingIds.has(m.id));
-                if (newUnique.length === 0) return state; 
-                return { queue: [...(state.queue || []), ...newUnique] }; 
-            });
-            return;
-        }
-    }
-
-    const dangdutArr = ["Rhoma Irama", "Meggy Z", "Evie Tamala", "Elvy Sukaesih", "Rita Sugiarto", "Mansyur S", "Caca Handika", "Asep Irama", "Imam S Arifin", "Dangdut", "Koplo", "Monata", "Pallapa"];
-    const indoPopArr = ["Mahalini", "Bernadya", "Hindia", "Tiara Andini", "Sal Priadi", "Kunto Aji", "Nadin Amizah", "Pamungkas", "Yura Yunita", "Maliq & D'Essentials", "Juicy Luicy", "Rizky Febian", "Tulus", "Lyodra", "Sheila On 7", "D'Masiv", "Noah"];
-    const baratPopArr = ["Taylor Swift", "The Weeknd", "Bruno Mars", "Ariana Grande", "Justin Bieber", "Post Malone", "Dua Lipa", "Coldplay", "Ed Sheeran", "Sabrina Carpenter", "Billie Eilish", "Charlie Puth", "Benson Boone"];
-    const rockArr = ["Linkin Park", "Nirvana", "Green Day", "Guns N' Roses", "Queen", "Muse", "Oasis", "Arctic Monkeys", "Bon Jovi"];
-
-    const baseIsDangdut = dangdutArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()) || cleanTitle.toLowerCase().includes(a.toLowerCase()));
-    const baseIsBarat = baratPopArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()));
-    const baseIsRock = rockArr.some(a => cleanArtist.toLowerCase().includes(a.toLowerCase()));
-
-    let queryPool = [ `"${cleanArtist}" official audio`, `${cleanArtist} lagu terbaik official` ]; 
-    
-    if (baseIsDangdut) {
-        const randomHits = dangdutArr.sort(() => 0.5 - Math.random()).slice(0, 2);
-        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" lagu original`);
-    } else if (baseIsBarat) {
-        const randomHits = baratPopArr.sort(() => 0.5 - Math.random()).slice(0, 2);
-        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" official audio`);
-    } else if (baseIsRock) {
-        const randomHits = rockArr.sort(() => 0.5 - Math.random()).slice(0, 2);
-        queryPool.push(`"${randomHits[0]}" official audio`, `"${randomHits[1]}" official audio`);
-    } else {
-        const randomHits = indoPopArr.sort(() => 0.5 - Math.random()).slice(0, 2);
-        queryPool.push(`${cleanArtist} mix official`, `"${randomHits[0]}" official audio`);
-    }
-
-    try {
-        const responses = await Promise.all(queryPool.map(q => fetch(`https://api.siputzx.my.id/api/s/youtube?query=${encodeURIComponent(q)}`)));
-        const datasets = await Promise.all(responses.map(r => r.json()));
-        let combined = [];
-        datasets.forEach(d => { if(d.status && d.data) combined = [...combined, ...d.data.sort(() => 0.5 - Math.random())]; });
-        
-        let mix = [];
-        let usedIds = new Set([baseSong.id]); 
-        let usedTitles = new Set([cleanTitle.toLowerCase()]);
-        let uploaderCount = {}; 
-
-        combined.filter(t => t.type === 'video' && !isBadMix(t.title)).forEach(t => {
-            const validId = t.id || t.videoId || (t.url ? t.url.split('v=')[1] : null);
-            if (!validId || usedIds.has(validId)) return;
-            
-            let tCleanT = t.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-            if (tCleanT.includes('-')) tCleanT = tCleanT.split('-')[1];
-            tCleanT = tCleanT.trim();
-
-            let titleCheck = tCleanT.toLowerCase().replace(/[^a-z0-9\s]/gi, '').replace(/(official|lyric|audio|video|music|cover|remix|live)/gi, '').trim();
-            const isThisSongDangdut = dangdutArr.some(a => tCleanT.toLowerCase().includes(a.toLowerCase()) || (t.author?.name || '').toLowerCase().includes(a.toLowerCase()) || tCleanT.toLowerCase().includes('dangdut'));
-            if (!baseIsDangdut && isThisSongDangdut) return;
-            if (baseIsDangdut && baratPopArr.some(a => (t.author?.name || '').toLowerCase().includes(a.toLowerCase()))) return;
-
-            if (titleCheck.length > 3) {
-                let isDup = Array.from(usedTitles).some(seen => seen.includes(titleCheck) || titleCheck.includes(seen));
-                if (isDup) return; 
-                usedTitles.add(titleCheck);
-            }
-
-            let uploaderName = t.author?.name || 'YouTube';
-            let uploaderLow = uploaderName.toLowerCase();
-            if (uploaderLow.includes('ringtone') || uploaderLow.includes('dj ') || uploaderLow.includes('karaoke')) return;
-            if (uploaderCount[uploaderName] >= 2) return;
-            uploaderCount[uploaderName] = (uploaderCount[uploaderName] || 0) + 1;
-
-            mix.push({ id: validId, title: tCleanT, artist: uploaderName.replace(/ - Topic/gi, '').trim(), image: t.thumbnail });
-            usedIds.add(validId);
-        });
-
-        mix.sort((a, b) => (a.artist.toLowerCase().includes(cleanArtist.toLowerCase()) ? -1 : 1) - (b.artist.toLowerCase().includes(cleanArtist.toLowerCase()) ? -1 : 1));
-        mix = mix.slice(0, 25);
-        if (mix.length > 0) {
-            sessionStorage.setItem(cacheKey, JSON.stringify(mix)); 
-            usePlayerStore.setState(state => {
-                const existingIds = new Set((state.queue || []).map(q => q.id));
-                const newUnique = mix.filter(m => !existingIds.has(m.id));
-                return { queue: [...(state.queue || []), ...newUnique] }; 
-            });
-        }
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    if (!currentSong || (queue || []).length === 0) return;
-    if ((queue || []).length - 1 - currentIndex <= 2) generateRadioMix(currentSong);
-  }, [currentSong?.id, currentIndex, (queue || []).length]);
-
-  useEffect(() => {
-    if (location.pathname !== '/search') {
-      setSearchQuery(''); setShowSearchHistory(false);
-    } else {
-      const params = new URLSearchParams(location.search);
-      if (params.get('q')) setSearchQuery(params.get('q'));
-    }
-  }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchQuery.trim().length > 2) {
-        setIsFetchingSuggestions(true);
-        const qLower = searchQuery.trim().toLowerCase();
-        const cacheKey = `search_smart_${qLower}`;
-        const cachedSearch = sessionStorage.getItem(cacheKey);
-
-        if (cachedSearch) {
-            const { texts, lives } = safeParse(cachedSearch, { texts: [], lives: [] });
-            setTextSuggestions(texts || []); setLiveSuggestions(lives || []); setIsFetchingSuggestions(false);
-            return;
-        }
-        if (isOffline) { setIsFetchingSuggestions(false); return; }
-
-        try {
-          const queryPintar = encodeURIComponent(searchQuery.trim());
-          const response = await fetch(`https://api.siputzx.my.id/api/s/youtube?query=${queryPintar}`);
-          const resData = await response.json();
-          if (resData.status && resData.data) {
-            let formattedResults = resData.data.filter(item => item.type === 'video' && !isNonMusic(item.title)).map(track => {
-                const validId = track.id || track.videoId || (track.url ? track.url.split('v=')[1] : null);
-                let cleanT = track.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').replace(/(official|music video|lyric|lyrics|audio|hq|hd|live|performance|remix)/gi, '').replace(/- -/g, '-').replace(/\s+/g, ' ').trim(); 
-                let cleanA = (track.author?.name || 'YouTube').replace(/vevo|official|topic|music|channel|records/gi, '').trim();
-                return { id: validId, title: cleanT, artist: cleanA, image: track.thumbnail };
-              }).filter(track => track.id != null);
-
-            const uniqueTexts = new Set();
-            formattedResults.forEach(track => {
-              let t = track.title.toLowerCase().replace(/[^a-z0-9\s-]/gi, '').trim();
-              if (t.length > 2) uniqueTexts.add(t);
-            });
-            const finalTexts = [qLower, ...Array.from(uniqueTexts).filter(t => t !== qLower)].slice(0, 6);
-            const finalLives = formattedResults.slice(0, 4);
-
-            setTextSuggestions(finalTexts); setLiveSuggestions(finalLives); 
-            sessionStorage.setItem(cacheKey, JSON.stringify({ texts: finalTexts, lives: finalLives }));
-          }
-        } catch (error) {} finally { setIsFetchingSuggestions(false); }
-      } else { setLiveSuggestions([]); setTextSuggestions([]); }
-    }, 500); 
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, isOffline]); 
-
-  const executeSearch = (query) => {
-    const q = query.trim();
-    if (!q) return;
-    setSearchQuery(q); 
-    const newHistory = [q, ...searchHistory.filter(item => item !== q)].slice(0, 10);
-    setSearchHistory(newHistory);
-    setLocal('ytm_search_history', newHistory);
-    navigate(`/search?q=${encodeURIComponent(q)}`);
-    setShowSearchHistory(false);
-  };
-
-  const handleSearchSubmit = (e) => {
-    e.preventDefault(); 
-    if (isOffline) { showToast("🔴 Mode Offline: Tidak bisa melakukan pencarian lagu baru."); return; }
-    executeSearch(searchQuery);
-    if (document.activeElement) document.activeElement.blur(); 
-  };
-
-  const removeSearchHistory = (itemToRemove) => {
-    const newHistory = searchHistory.filter(item => item !== itemToRemove);
-    setSearchHistory(newHistory);
-    setLocal('ytm_search_history', newHistory);
-  };
-
-  const displayArtist = useMemo(() => {
-    if (!currentSong) return "Artis";
-    let a = currentSong.artist || "";
-    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
-    if (!a || a.toLowerCase() === 'youtube') if (currentSong.title && currentSong.title.includes('-')) a = currentSong.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-    return a.trim() || "Artis";
-  }, [currentSong]);
-
-  const displayTitle = useMemo(() => {
-    if (!currentSong?.title) return "Pilih Lagu";
-    let t = currentSong.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-    if (t.includes('-')) {
-       let parts = t.split('-');
-       let artistName = displayArtist.toLowerCase();
-       if (parts[0].toLowerCase().includes(artistName)) t = parts.slice(1).join('-'); 
-       else if (parts[1] && parts[1].toLowerCase().includes(artistName)) t = parts[0];
-       else t = parts.slice(1).join('-');
-    }
-    return t.trim() || currentSong.title;
-  }, [currentSong, displayArtist]);
-
-  const handleIframeLoad = () => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'listening' }), '*');
-      const active = getActiveAudio();
-      if (active) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [active.currentTime, true] }), '*');
-      if (mediaMode === 'audio') {
-          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'mute', args: [] }), '*');
-          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
-      } else {
-          iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
-          if (isPlaying && !isAdzanPlayingRef.current) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
-      }
-    }
-  };
-
-  useEffect(() => {
-      const syncMedia = () => {
-          if (!iframeRef.current?.contentWindow) return;
-          if (isAdzanPlayingRef.current) {
-              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
-              return; 
-          }
-          const active = getActiveAudio();
-          if (mediaMode === 'audio') {
-              if (active) active.muted = false;
-              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
-          } else {
-              if (active) active.muted = true;
-              if (active) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [active.currentTime, true] }), '*');
-              iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'unMute', args: [] }), '*');
-              if (isPlaying) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
-              else iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
-          }
-      };
-      syncMedia();
-      const t1 = setTimeout(syncMedia, 500);
-      return () => { clearTimeout(t1); };
-  }, [mediaMode, isPlaying, currentSong?.id]);
+  }, [currentSong?.id, displayTitle, displayArtist, API_BASE, isOffline]);
 
   useEffect(() => {
     if (duration > 0 && lrclibDuration > 0) {
@@ -1004,6 +1050,7 @@ function MainApp() {
         }
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime, lyrics, activeLyricIndex, lyricOffset, isSyncMode, lyricsMode, isExpanded, activeTab]);
 
   const toggleRepeat = () => {
@@ -1036,7 +1083,9 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 EVENT LISTENER LOCKSCREEN 🔥
+  // 🔥 DAFTARKAN LISTENER LOCKSCREEN HANYA 1 KALI 🔥
+  const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
+  
   useEffect(() => {
     handlersRef.current = { toggle: handleTogglePlayLocal, next: handleNextLocal, prev: handlePrevLocal, seek: handleSeek };
   });
@@ -1044,21 +1093,42 @@ function MainApp() {
   useEffect(() => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.setActionHandler('play', () => handlersRef.current.toggle && handlersRef.current.toggle(null));
-      navigator.mediaSession.setActionHandler('pause', () => handlersRef.current.toggle && handlersRef.current.toggle(null));
+      navigator.mediaSession.setActionHandler('pause', () => { 
+        const active = getActiveAudio();
+        if (active) active.pause();
+        if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+        usePlayerStore.setState({ isPlaying: false });
+      });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
   }, []);
 
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
   const handleTimeUpdate = (e) => {
+      if (e.target !== getActiveAudio()) return;
+      
       if (isAdzanPlayingRef.current) {
-          if (Date.now() >= adzanEndTimeRef.current) { dismissAdzanPause(); return; }
-          if (e.target.currentTime > adzanPausedTimeRef.current + 0.5) { e.target.currentTime = adzanPausedTimeRef.current; }
+          if (Date.now() >= adzanEndTimeRef.current) {
+              dismissAdzanPause();
+              return;
+          }
+          if (e.target.currentTime > adzanPausedTimeRef.current + 0.5) {
+              e.target.currentTime = adzanPausedTimeRef.current;
+          }
           return; 
       }
+
       const newTime = e.target.currentTime;
+      const currentDur = e.target.duration || 0;
       const prevTime = currentTimeRef.current;
+
       if (!isDragging && mediaMode === 'audio') {
           if (Math.abs(prevTime - newTime) >= 0.5) {
               setCurrentTime(newTime);
@@ -1068,10 +1138,12 @@ function MainApp() {
   };
 
   const handleLoadedMetadata = (e) => {
+      if (e.target !== getActiveAudio()) return;
       if (mediaMode === 'audio') setDuration(e.target.duration);
   };
   
   const handleCanPlay = (e) => {
+      if (e.target !== getActiveAudio()) return;
       setIsBuffering(false);
       if (isPlaying && mediaMode === 'audio' && !isAdzanPlayingRef.current) {
           e.target.play().catch(()=>{});
@@ -1079,26 +1151,36 @@ function MainApp() {
   };
   
   const handleError = (e) => {
-      const err = e.nativeEvent ? e.nativeEvent.error : null;
+      if (e.target !== getActiveAudio()) return;
+      const err = e.target.error;
       if (!err) return;
       if (err.code === 1 || err.code === 20 || err.message?.includes('aborted')) return; 
       
-      console.error("Audio Error:", err);
-      if (mediaMode === 'audio' && currentSong?.id) {
+      console.error("Audio Error Murni:", err);
+      if (mediaMode === 'audio' && currentSong?.id && e.target.src) {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
-          showToast("❌ Sinyal audio terputus.");
+          showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
       }
   };
   
   const handleWaiting = (e) => {
+      if (e.target !== getActiveAudio()) return;
       setIsBuffering(true);
   };
   
   const handlePlaying = (e) => {
+      if (e.target !== getActiveAudio()) return;
       setIsBuffering(false);
+      
+      // Update widget saat lagu SUDAH BERHASIL dimainkan
+      if (currentSong) {
+          updateMediaSession(currentSong);
+      }
+
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: true });
+          
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
@@ -1106,11 +1188,14 @@ function MainApp() {
   };
   
   const handlePause = (e) => {
+      if (e.target !== getActiveAudio()) return;
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
       }
   };
+
+  window.saklarPusat = handleTogglePlayLocal;
 
   return (
     <div className="h-screen bg-[#0f0f0f] text-white flex flex-col font-sans overflow-hidden relative">
@@ -1128,16 +1213,19 @@ function MainApp() {
       {/* 🔥 ALWAYS-ON SILENT ENGINE 🔥 */}
       <audio ref={keepAliveAudioRef} src={SILENT_MP3} loop playsInline className="hidden" />
 
-      {/* 🔥 AUDIO FISIK ASLI 🔥 */}
+      {/* 🔥 MAIN AUDIO PAKAI ONENDED MURNI 🔥 */}
       <audio
         ref={audioRef} playsInline preload="auto"
-        onEnded={(e) => {
+        onEnded={() => {
             const st = usePlayerStore.getState();
             if (st.repeatMode === 'one') {
-                e.target.currentTime = 0; 
-                e.target.play().catch(()=>{});
+                if (audioRef.current) { 
+                    audioRef.current.currentTime = 0; 
+                    audioRef.current.play(); 
+                    updateMediaSession(currentSong);
+                }
             } else {
-                handleNextLocal(null); 
+                handleNextLocal(null);
             }
         }}
         onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata}
@@ -1400,21 +1488,21 @@ function MainApp() {
       >
         <div className="absolute top-[-5px] left-0 right-0 h-[10px] group/timeline items-center cursor-pointer z-50 md:flex hidden">
           <input 
-             type="range" min={0} max={duration || 100} value={currentTime || 0} 
+             type="range" min={0} max={duration || 100} value={currentTime} 
              onMouseDown={(e) => { e.stopPropagation(); setIsDragging(true); }} 
              onMouseUp={(e) => { e.stopPropagation(); setIsDragging(false); }} 
              onChange={(e) => { e.stopPropagation(); handleSeek(e); }} 
              className="w-full h-full absolute inset-0 opacity-0 cursor-pointer z-20" 
           />
           <div className="w-full h-[2px] bg-white/10 group-hover/timeline:h-[4px] transition-all relative pointer-events-none">
-             <div className="h-full bg-[#ff0000] relative transition-all duration-300" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}>
+             <div className="h-full bg-[#ff0000] relative transition-all duration-300" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}>
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-[#ff0000] rounded-full opacity-0 group-hover/timeline:opacity-100 shadow-md"></div>
              </div>
           </div>
         </div>
         
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/10 md:hidden pointer-events-none">
-           <div className="h-full bg-[#ff0000] transition-all duration-300" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}></div>
+           <div className="h-full bg-[#ff0000] transition-all duration-300" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}></div>
         </div>
 
         <div className="md:hidden flex items-center justify-between w-full h-full pt-1">
@@ -1612,13 +1700,13 @@ function MainApp() {
 
               <div className="relative flex items-center pt-2 px-2 h-6 cursor-pointer">
                 <input 
-                  type="range" min={0} max={duration || 100} value={currentTime || 0} 
+                  type="range" min={0} max={duration || 100} value={currentTime} 
                   onMouseDown={() => setIsDragging(true)} onMouseUp={() => setIsDragging(false)} 
                   onTouchStart={() => setIsDragging(true)} onTouchEnd={() => setIsDragging(false)} 
                   onChange={handleSeek} className="w-full h-full bg-transparent appearance-none cursor-pointer z-20 absolute inset-0 opacity-0" 
                 />
                 <div className="w-full h-1.5 bg-zinc-700 rounded-full pointer-events-none transition-all relative flex items-center">
-                  <div className="h-full bg-white rounded-full pointer-events-none relative flex items-center justify-end" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}>
+                  <div className="h-full bg-white rounded-full pointer-events-none relative flex items-center justify-end" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}>
                     <div className={`w-3.5 h-3.5 bg-white rounded-full absolute -right-1.5 shadow-md z-10 transition-transform duration-200 ${isDragging ? 'scale-150' : 'scale-100'}`}></div>
                   </div>
                 </div>
@@ -1763,7 +1851,7 @@ function MainApp() {
                     </div>
 
                     <div className="flex flex-col border-t border-white/5 pt-2">
-                      {(queue || []).length > 0 ? (queue || []).map((qSong, idx) => {
+                      {queue && queue.length > 0 ? queue.map((qSong, idx) => {
                         const isCurrent = qSong.id === currentSong?.id;
                         return (
                         <div 
@@ -1923,7 +2011,7 @@ function MainApp() {
 
 // 🔥 PINTU GERBANG VIP (LOGIN SCREEN) 🔥
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => getLocalBool('rnc_vip_access'));
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('rnc_vip_access') === 'true');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
 
@@ -1941,7 +2029,7 @@ export default function App() {
     ];
 
     if (validCodes.includes(password.toLowerCase().trim())) {
-      setLocal('rnc_vip_access', true);
+      localStorage.setItem('rnc_vip_access', 'true');
       setIsAuthenticated(true);
     } else {
       setError(true);
