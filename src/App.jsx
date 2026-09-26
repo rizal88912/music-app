@@ -64,9 +64,6 @@ const isBadMix = (title) => {
 };
 
 function MainApp() {
-  // =========================================================================
-  // 🔥 1. SEMUA VARIABEL & STATE DITETAPKAN DI ATAS BIAR GAK CRASH 🔥
-  // =========================================================================
   const { currentSong, isPlaying, togglePlay, playNext, playPrev, playSong, queue, currentIndex } = usePlayerStore();
   const location = useLocation();
   const navigate = useNavigate();
@@ -90,7 +87,23 @@ function MainApp() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  // 🔥 1 AUDIO ENGINE MURNI (NO ERROR DOUBLE VARIABLE) 🔥
+  const iframeRef = useRef(null);
+  const audioRef = useRef(null);
+  const keepAliveAudioRef = useRef(null);
+  const getActiveAudio = () => audioRef.current;
+  
+  const isTransitioningRef = useRef(false);
+  const isSeekingRef = useRef(false);
+  const API_BASE = "https://music-app-production-3507.up.railway.app";
+
+  const adzanPausedTimeRef = useRef(0);
+  const adzanEndTimeRef = useRef(0);
+  const adzanOriginalLoopRef = useRef(false);
+  const workerRef = useRef(null); 
+  
   const [currentTime, setCurrentTime] = useState(0);
+  const currentTimeRef = useRef(0);
   const [duration, setDuration] = useState(0); 
   const [isDragging, setIsDragging] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -98,14 +111,17 @@ function MainApp() {
   const [lyrics, setLyrics] = useState([]);
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
   const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
+  const lyricsContainerRef = useRef(null);
   
+  const activeQueueRef = useRef(null);
   const [lyricOffset, setLyricOffset] = useState(0);
   const [lrclibDuration, setLrclibDuration] = useState(0); 
   const [isSyncMode, setIsSyncMode] = useState(false);
   
   const [isLiked, setIsLiked] = useState(false);
-  const [isShuffle, setIsShuffle] = useState(false); // ✅ Sekarang aman dipakai!
-  
+  const [isShuffle, setIsShuffle] = useState(false);
+  const repeatMode = usePlayerStore(state => state.repeatMode || 'off'); 
+
   const [toastMsg, setToastMsg] = useState("");
   const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, song: null });
 
@@ -113,98 +129,22 @@ function MainApp() {
   const [prayerTimes, setPrayerTimes] = useState([]); 
   const [activePrayerName, setActivePrayerName] = useState(null); 
   
-  const [relatedSongs, setRelatedSongs] = useState([]);
-  const [isLoadingRelated, setIsLoadingRelated] = useState(false);
-
-  // =========================================================================
-  // 🔥 2. SEMUA REFS & CONSTANTS 🔥
-  // =========================================================================
-  const iframeRef = useRef(null);
-  const audioRef = useRef(null);
-  const keepAliveAudioRef = useRef(null);
-  const isTransitioningRef = useRef(false);
-  const isSeekingRef = useRef(false);
-  const nextAudioUrlRef = useRef(null);
-  const workerRef = useRef(null); 
-  const lyricsContainerRef = useRef(null);
-  const activeQueueRef = useRef(null);
-  const currentTimeRef = useRef(0);
-  const adzanPausedTimeRef = useRef(0);
-  const adzanEndTimeRef = useRef(0);
-  const adzanOriginalLoopRef = useRef(false);
   const lastAdzanTriggered = useRef("");
   const wasPlayingBeforeAdzan = useRef(false);
   const isAdzanPlayingRef = useRef(false); 
-  const mediaModeRef = useRef(mediaMode);
-  const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
 
-  const API_BASE = "https://music-app-production-3507.up.railway.app";
-  const getActiveAudio = () => audioRef.current;
-  const repeatMode = usePlayerStore(state => state.repeatMode || 'off'); 
+  const mediaModeRef = useRef(mediaMode);
+  const [relatedSongs, setRelatedSongs] = useState([]);
+  const [isLoadingRelated, setIsLoadingRelated] = useState(false);
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // =========================================================================
-  // 🔥 3. PREFETCH LAGU SELANJUTNYA 🔥
-  // =========================================================================
-  useEffect(() => {
-      if (queue.length === 0) return;
-      let nextIdx = currentIndex + 1;
-      if (isShuffle) nextIdx = Math.floor(Math.random() * queue.length);
-      const nextSong = queue[nextIdx];
-
-      if (nextSong) {
-          const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
-          let prefetchLink = document.getElementById('next-audio-prefetch');
-          if (!prefetchLink) {
-              prefetchLink = document.createElement('link');
-              prefetchLink.id = 'next-audio-prefetch';
-              prefetchLink.rel = 'prefetch';
-              prefetchLink.as = 'audio';
-              document.head.appendChild(prefetchLink);
-          }
-          prefetchLink.href = originalUrl;
-          nextAudioUrlRef.current = originalUrl;
-      } else {
-          nextAudioUrlRef.current = null;
-      }
-  }, [currentIndex, queue, isShuffle, API_BASE]);
-
-  // =========================================================================
-  // 🔥 4. FUNGSI INJEKSI METADATA ALA YOUTUBE MUSIC 🔥
-  // =========================================================================
-  const updateMediaSession = (song) => {
-    if (!('mediaSession' in navigator) || !song) return;
-
-    let a = song.artist || "Artis";
-    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
-    if (!a || a.toLowerCase() === 'youtube') if (song.title && song.title.includes('-')) a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
-    let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
-    if (t.includes('-')) {
-       let parts = t.split('-');
-       if (parts[0].toLowerCase().includes(a.toLowerCase())) t = parts.slice(1).join('-');
-       else if (parts[1] && parts[1].toLowerCase().includes(a.toLowerCase())) t = parts[0];
-       else t = parts.slice(1).join('-');
-    }
-    t = t.trim() || song.title;
-
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: t,
-      artist: a,
-      album: 'RnCmusic Premium',
-      artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
-    });
-    navigator.mediaSession.playbackState = 'playing';
-    document.title = `${t} - ${a}`;
-  };
-
-  // =========================================================================
-  // 🔥 5. EVENT HANDLERS UTAMA 🔥
-  // =========================================================================
   useEffect(() => {
       if ('serviceWorker' in navigator) {
           navigator.serviceWorker.ready.then(registration => {
-              registration.addEventListener('updatefound', () => { setUpdateAvailable(true); });
+              registration.addEventListener('updatefound', () => {
+                  setUpdateAvailable(true);
+              });
           });
       }
   }, []);
@@ -251,10 +191,11 @@ function MainApp() {
 
   useEffect(() => {
       const unlockAudio = () => {
-          const silent = keepAliveAudioRef.current;
-          if (silent && silent.paused) silent.play().then(() => silent.pause()).catch(() => {});
           const active = getActiveAudio();
-          if (active && active.paused && !currentSong?.id) active.play().then(()=> active.pause()).catch(()=>{});
+          const silent = keepAliveAudioRef.current;
+          if (active && active.paused && !currentSong?.id) active.play().then(() => active.pause()).catch(() => {});
+          if (silent && silent.paused) silent.play().then(() => silent.pause()).catch(() => {});
+          
           document.removeEventListener('click', unlockAudio);
           document.removeEventListener('touchstart', unlockAudio);
       };
@@ -287,6 +228,7 @@ function MainApp() {
               if (active) {
                   active.muted = false;
                   active.volume = 1;
+                  active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
                   usePlayerStore.setState({ isPlaying: true });
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
@@ -310,8 +252,10 @@ function MainApp() {
           } else {
               if (active) {
                   adzanPausedTimeRef.current = active.currentTime;
+                  adzanOriginalLoopRef.current = active.loop;
                   active.muted = true;
                   active.volume = 0;
+                  active.loop = true; 
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
@@ -319,6 +263,9 @@ function MainApp() {
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
   };
+
+  const fireAdzanPauseRef = useRef(fireAdzanPause);
+  useEffect(() => { fireAdzanPauseRef.current = fireAdzanPause; }, [fireAdzanPause]);
 
   const dismissAdzanIfActive = () => {
       if (isAdzanPlayingRef.current) {
@@ -363,7 +310,9 @@ function MainApp() {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => fetchByCoords(position.coords.latitude, position.coords.longitude),
-                (error) => { fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta')); }, { timeout: 10000 }
+                (error) => {
+                    fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
+                }, { timeout: 10000 }
             );
         } else {
             fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
@@ -404,6 +353,36 @@ function MainApp() {
     return () => { worker.postMessage({ cmd: 'stop' }); worker.terminate(); };
   }, [adzanMode, prayerTimes]);
 
+  const updateMediaSession = (song) => {
+    if (!('mediaSession' in navigator) || !song) return;
+
+    let a = song.artist || "Artis";
+    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
+    if (!a || a.toLowerCase() === 'youtube') {
+        if (song.title && song.title.includes('-')) {
+            a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+        }
+    }
+
+    let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    if (t.includes('-')) {
+       let parts = t.split('-');
+       if (parts[0].toLowerCase().includes(a.toLowerCase())) t = parts.slice(1).join('-');
+       else if (parts[1] && parts[1].toLowerCase().includes(a.toLowerCase())) t = parts[0];
+       else t = parts.slice(1).join('-');
+    }
+    t = t.trim() || song.title;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t,
+      artist: a,
+      album: 'RnCmusic Premium',
+      artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
+    });
+    navigator.mediaSession.playbackState = 'playing';
+    document.title = `${t} - ${a}`;
+  };
+
   const handleNextLocal = (e) => {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
@@ -415,10 +394,10 @@ function MainApp() {
       const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
-          updateMediaSession(nextSong); // INJEKSI METADATA
+          updateMediaSession(nextSong); 
           const active = getActiveAudio();
           if (active) {
-              active.src = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
+              active.src = `${API_BASE}/api/audio?id=${nextSong.id}`;
               active.load();
               active.play().then(() => {
                   isTransitioningRef.current = false;
@@ -1067,7 +1046,6 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 EVENT LISTENER LOCKSCREEN 🔥
   useEffect(() => {
     handlersRef.current = { toggle: handleTogglePlayLocal, next: handleNextLocal, prev: handlePrevLocal, seek: handleSeek };
   });
@@ -1117,7 +1095,7 @@ function MainApp() {
   };
   
   const handleError = (e) => {
-      const err = e.target.error;
+      const err = e.nativeEvent ? e.nativeEvent.error : null;
       if (!err) return;
       if (err.code === 1 || err.code === 20 || err.message?.includes('aborted')) return; 
       
@@ -1151,6 +1129,8 @@ function MainApp() {
       }
   };
 
+  window.saklarPusat = handleTogglePlayLocal;
+
   return (
     <div className="h-screen bg-[#0f0f0f] text-white flex flex-col font-sans overflow-hidden relative">
       
@@ -1176,7 +1156,7 @@ function MainApp() {
                 e.target.currentTime = 0; 
                 e.target.play().catch(()=>{});
             } else {
-                handleNextLocal(null);
+                handleNextLocal(null); 
             }
         }}
         onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata}
