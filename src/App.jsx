@@ -26,8 +26,6 @@ const MosqueIcon = ({ size = 24, className = "" }) => (
   </svg>
 );
 
-const SILENT_MP3 = "data:audio/mp3;base64,//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
-
 const isNonMusic = (title) => {
   if (!title) return false;
   const t = title.toLowerCase();
@@ -63,7 +61,6 @@ const isBadMix = (title) => {
   return badMixWords.some(w => t.includes(w));
 };
 
-// 🔥 FUNGSI PENYELAMAT MEMORI (ANTI WHITE SCREEN) 🔥
 const safeParse = (str, fallback) => {
   try { return str ? JSON.parse(str) : fallback; } catch (e) { return fallback; }
 };
@@ -73,9 +70,6 @@ function MainApp() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ==========================================
-  // 🔥 1. SEMUA STATE DEKLARASI (RApi & Aman)
-  // ==========================================
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState('upnext'); 
   const [mediaMode, setMediaMode] = useState('audio'); 
@@ -92,7 +86,18 @@ function MainApp() {
   
   const [searchHistory, setSearchHistory] = useState(() => safeParse(localStorage.getItem('ytm_search_history'), []));
 
+  const iframeRef = useRef(null);
+  
+  // 🔥 AUDIO DOM MURNI & STABIL 🔥
+  const audioRef = useRef(null);
+  const API_BASE = "https://music-app-production-3507.up.railway.app";
+
+  const adzanPausedTimeRef = useRef(0);
+  const adzanEndTimeRef = useRef(0);
+  const workerRef = useRef(null); 
+  
   const [currentTime, setCurrentTime] = useState(0);
+  const currentTimeRef = useRef(0);
   const [duration, setDuration] = useState(0); 
   const [isDragging, setIsDragging] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -100,7 +105,9 @@ function MainApp() {
   const [lyrics, setLyrics] = useState([]);
   const [activeLyricIndex, setActiveLyricIndex] = useState(-1);
   const [isLoadingLyrics, setIsLoadingLyrics] = useState(false);
+  const lyricsContainerRef = useRef(null);
   
+  const activeQueueRef = useRef(null);
   const [lyricOffset, setLyricOffset] = useState(0);
   const [lrclibDuration, setLrclibDuration] = useState(0); 
   const [isSyncMode, setIsSyncMode] = useState(false);
@@ -116,53 +123,24 @@ function MainApp() {
   const [prayerTimes, setPrayerTimes] = useState([]); 
   const [activePrayerName, setActivePrayerName] = useState(null); 
   
-  const [relatedSongs, setRelatedSongs] = useState([]);
-  const [isLoadingRelated, setIsLoadingRelated] = useState(false);
-
-  // ==========================================
-  // 🔥 2. SEMUA REFS (Sumber White Screen kemaren udah dibenerin disini)
-  // ==========================================
-  const iframeRef = useRef(null);
-  const audioRef = useRef(null);
-  const keepAliveAudioRef = useRef(null);
-  const getActiveAudio = () => audioRef.current;
-
-  const isTransitioningRef = useRef(false);
-  const isSeekingRef = useRef(false);
-  const API_BASE = "https://music-app-production-3507.up.railway.app";
-
-  const adzanPausedTimeRef = useRef(0);
-  const adzanEndTimeRef = useRef(0);
-  const adzanOriginalLoopRef = useRef(false);
-  const workerRef = useRef(null); 
-  const lyricsContainerRef = useRef(null);
-  const activeQueueRef = useRef(null);
-  const currentTimeRef = useRef(0);
-
   const lastAdzanTriggered = useRef("");
   const wasPlayingBeforeAdzan = useRef(false);
   const isAdzanPlayingRef = useRef(false); 
-  const mediaModeRef = useRef(mediaMode);
 
-  // INI DIA YANG BIKIN WHITE SCREEN KEMAREN (Sekarang udah aman)
-  const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
+  const mediaModeRef = useRef(mediaMode);
+  const [relatedSongs, setRelatedSongs] = useState([]);
+  const [isLoadingRelated, setIsLoadingRelated] = useState(false);
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // ==========================================
-  // 🔥 3. METADATA INJEKTOR (NEMBUS WIDGET)
-  // ==========================================
+  // 🔥 UPDATE METADATA 🔥
   const updateMediaSession = (song) => {
     if (!('mediaSession' in navigator) || !song) return;
 
     let a = song.artist || "Artis";
     a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
-    if (!a || a.toLowerCase() === 'youtube') {
-        if (song.title && song.title.includes('-')) {
-            a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
-        }
-    }
-
+    if (!a || a.toLowerCase() === 'youtube') if (song.title && song.title.includes('-')) a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+    
     let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
     if (t.includes('-')) {
        let parts = t.split('-');
@@ -232,12 +210,8 @@ function MainApp() {
 
   useEffect(() => {
       const unlockAudio = () => {
-          const silent = keepAliveAudioRef.current;
-          if (silent && silent.paused) silent.play().then(() => silent.pause()).catch(() => {});
-          
-          const active = getActiveAudio();
+          const active = audioRef.current;
           if (active && active.paused && !currentSong?.id) active.play().then(()=> active.pause()).catch(()=>{});
-
           document.removeEventListener('click', unlockAudio);
           document.removeEventListener('touchstart', unlockAudio);
       };
@@ -261,23 +235,22 @@ function MainApp() {
       adzanEndTimeRef.current = 0;
       
       if (wasPlayingBeforeAdzan.current) {
-          const active = getActiveAudio();
+          const active = audioRef.current;
           if (mediaModeRef.current === 'video') {
               usePlayerStore.setState({ isPlaying: true });
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
-              if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           } else {
               if (active) {
                   active.muted = false;
                   active.volume = 1;
-                  active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
+                  active.play().catch(()=>{});
                   usePlayerStore.setState({ isPlaying: true });
-                  if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+                  showToast('▶️ Gas lagi! Waktu Adzan selesai.');
               }
           }
       } else {
-          if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+          showToast('▶️ Waktu Adzan selesai.');
       }
   };
 
@@ -288,19 +261,15 @@ function MainApp() {
 
       if (wasPlayingBeforeAdzan.current) {
           usePlayerStore.setState({ isPlaying: false }); 
-          const active = getActiveAudio();
+          const active = audioRef.current;
           if (mediaModeRef.current === 'video') {
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           } else {
               if (active) {
                   adzanPausedTimeRef.current = active.currentTime;
-                  adzanOriginalLoopRef.current = active.loop;
-                  active.muted = true;
-                  active.volume = 0;
-                  active.loop = true; 
+                  active.pause();
               }
           }
-          if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -352,9 +321,7 @@ function MainApp() {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 (position) => fetchByCoords(position.coords.latitude, position.coords.longitude),
-                (error) => {
-                    fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
-                }, { timeout: 10000 }
+                (error) => { fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta')); }, { timeout: 10000 }
             );
         } else {
             fetch('https://get.geojs.io/v1/ip/geo.json').then(res => res.json()).then(locationData => fetchByCity(locationData.city || 'Jakarta')).catch(() => fetchByCity('Jakarta'));
@@ -395,32 +362,28 @@ function MainApp() {
     return () => { worker.postMessage({ cmd: 'stop' }); worker.terminate(); };
   }, [adzanMode, prayerTimes]);
 
+  // 🔥 EVENT KONTROL MURNI DOM 🔥
   const handleNextLocal = (e) => {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
 
-      isTransitioningRef.current = true;
       const st = usePlayerStore.getState();
       let nextIdx = st.currentIndex + 1;
-      
       const safeQueue = st.queue || [];
-      if (isShuffle) nextIdx = Math.floor(Math.random() * (safeQueue.length || 1));
+      
+      if (st.isShuffle) nextIdx = Math.floor(Math.random() * (safeQueue.length || 1));
       const nextSong = safeQueue[nextIdx];
 
       if (nextSong) {
-          const active = getActiveAudio();
+          const active = audioRef.current;
           if (active) {
               active.src = `${API_BASE}/api/audio?id=${nextSong.id}`;
               active.load();
-              active.play().then(() => {
-                  isTransitioningRef.current = false;
-                  usePlayerStore.setState({ isPlaying: true });
-                  updateMediaSession(nextSong);
-              }).catch(()=>{ isTransitioningRef.current = false; });
-          } else { isTransitioningRef.current = false; }
-      } else { isTransitioningRef.current = false; }
-      
-      st.playNext(isShuffle);
+              active.play().catch(()=>{});
+              updateMediaSession(nextSong);
+          }
+          st.playNext(st.isShuffle);
+      }
   };
 
   const handlePrevLocal = (e) => {
@@ -430,25 +393,21 @@ function MainApp() {
       if (currentTime > 3) {
           handleSeek({ target: { value: 0 } });
       } else {
-          isTransitioningRef.current = true;
           const st = usePlayerStore.getState();
           const prevIdx = st.currentIndex - 1;
           const safeQueue = st.queue || [];
           
           if (prevIdx >= 0 && safeQueue[prevIdx]) {
               const prevSong = safeQueue[prevIdx];
-              const active = getActiveAudio();
+              const active = audioRef.current;
               if (active) {
                   active.src = `${API_BASE}/api/audio?id=${prevSong.id}`;
                   active.load();
-                  active.play().then(() => {
-                      usePlayerStore.setState({ isPlaying: true });
-                      updateMediaSession(prevSong); 
-                  }).catch(()=>{});
+                  active.play().catch(()=>{});
+                  updateMediaSession(prevSong); 
               }
+              st.playPrev();
           }
-          st.playPrev();
-          setTimeout(() => { isTransitioningRef.current = false; }, 1000);
       }
   };
 
@@ -456,12 +415,11 @@ function MainApp() {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
 
-      const active = getActiveAudio();
+      const active = audioRef.current;
       if (!active) return;
 
       if (isPlaying) {
           active.pause();
-          if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
       } else {
@@ -472,7 +430,6 @@ function MainApp() {
           active.play().then(() => {
               usePlayerStore.setState({ isPlaying: true });
               if (currentSong) updateMediaSession(currentSong);
-              if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{}); 
           }).catch(()=>{});
           
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
@@ -489,7 +446,7 @@ function MainApp() {
           return; 
       }
       
-      const active = getActiveAudio();
+      const active = audioRef.current;
       if (active) {
           active.src = `${API_BASE}/api/audio?id=${qSong.id}`;
           active.load();
@@ -525,7 +482,7 @@ function MainApp() {
         });
       }
 
-      const active = getActiveAudio();
+      const active = audioRef.current;
       if (active) {
           active.src = `${API_BASE}/api/audio?id=${song.id}`;
           active.load();
@@ -549,7 +506,7 @@ function MainApp() {
     setCurrentTime(seekTime);
     currentTimeRef.current = seekTime;
     
-    const active = getActiveAudio();
+    const active = audioRef.current;
     if (active) active.currentTime = seekTime;
     
     if (iframeRef.current && iframeRef.current.contentWindow) {
@@ -887,7 +844,7 @@ function MainApp() {
   const handleIframeLoad = () => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'listening' }), '*');
-      const active = getActiveAudio();
+      const active = audioRef.current;
       if (active) iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [active.currentTime, true] }), '*');
       if (mediaMode === 'audio') {
           iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'mute', args: [] }), '*');
@@ -906,7 +863,7 @@ function MainApp() {
               iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
               return; 
           }
-          const active = getActiveAudio();
+          const active = audioRef.current;
           if (mediaMode === 'audio') {
               if (active) active.muted = false;
               iframeRef.current.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
@@ -926,8 +883,14 @@ function MainApp() {
   useEffect(() => {
     if (!currentSong?.id) { setIsLiked(false); return; }
 
-    setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
-    setIsBuffering(true);
+    const activeAudio = audioRef.current;
+    if (activeAudio && !activeAudio.src.includes(currentSong.id)) {
+        setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
+        setIsBuffering(true);
+        activeAudio.src = `${API_BASE}/api/audio?id=${currentSong.id}`;
+        activeAudio.load();
+        if (isPlaying && !isAdzanPlayingRef.current) activeAudio.play().catch(()=>{});
+    }
 
     const likedSongs = safeParse(localStorage.getItem('ytm_liked_songs'), []);
     setIsLiked(likedSongs.some(song => song.id === currentSong.id));
@@ -1006,7 +969,7 @@ function MainApp() {
       };
       searchAPI();
     }
-  }, [currentSong?.id, displayTitle, displayArtist, isOffline]);
+  }, [currentSong?.id, displayTitle, displayArtist, isOffline, isPlaying]);
 
   useEffect(() => {
     if (duration > 0 && lrclibDuration > 0) {
@@ -1063,7 +1026,7 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 DAFTARKAN LISTENER LOCKSCREEN AMAN 🔥
+  // 🔥 EVENT LISTENER LOCKSCREEN 🔥
   useEffect(() => {
     handlersRef.current = { toggle: handleTogglePlayLocal, next: handleNextLocal, prev: handlePrevLocal, seek: handleSeek };
   });
@@ -1134,9 +1097,6 @@ function MainApp() {
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: true });
           if (currentSong) updateMediaSession(currentSong);
-          if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
-              keepAliveAudioRef.current.play().catch(()=>{});
-          }
       }
   };
   
@@ -1146,10 +1106,6 @@ function MainApp() {
           usePlayerStore.setState({ isPlaying: false });
       }
   };
-
-  useEffect(() => {
-    window.saklarPusat = handleTogglePlayLocal;
-  }, [handleTogglePlayLocal]);
 
   return (
     <div className="h-screen bg-[#0f0f0f] text-white flex flex-col font-sans overflow-hidden relative">
@@ -1163,9 +1119,6 @@ function MainApp() {
               Versi Baru Tersedia! Klik untuk Update Web
           </div>
       )}
-
-      {/* 🔥 ALWAYS-ON SILENT ENGINE 🔥 */}
-      <audio ref={keepAliveAudioRef} src={SILENT_MP3} loop playsInline className="hidden" />
 
       {/* 🔥 AUDIO FISIK ASLI 🔥 */}
       <audio
@@ -1439,21 +1392,21 @@ function MainApp() {
       >
         <div className="absolute top-[-5px] left-0 right-0 h-[10px] group/timeline items-center cursor-pointer z-50 md:flex hidden">
           <input 
-             type="range" min={0} max={duration || 100} value={currentTime || 0} 
+             type="range" min={0} max={duration || 100} value={currentTime} 
              onMouseDown={(e) => { e.stopPropagation(); setIsDragging(true); }} 
              onMouseUp={(e) => { e.stopPropagation(); setIsDragging(false); }} 
              onChange={(e) => { e.stopPropagation(); handleSeek(e); }} 
              className="w-full h-full absolute inset-0 opacity-0 cursor-pointer z-20" 
           />
           <div className="w-full h-[2px] bg-white/10 group-hover/timeline:h-[4px] transition-all relative pointer-events-none">
-             <div className="h-full bg-[#ff0000] relative transition-all duration-300" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}>
+             <div className="h-full bg-[#ff0000] relative transition-all duration-300" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}>
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-[#ff0000] rounded-full opacity-0 group-hover/timeline:opacity-100 shadow-md"></div>
              </div>
           </div>
         </div>
         
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-white/10 md:hidden pointer-events-none">
-           <div className="h-full bg-[#ff0000] transition-all duration-300" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}></div>
+           <div className="h-full bg-[#ff0000] transition-all duration-300" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}></div>
         </div>
 
         <div className="md:hidden flex items-center justify-between w-full h-full pt-1">
@@ -1651,13 +1604,13 @@ function MainApp() {
 
               <div className="relative flex items-center pt-2 px-2 h-6 cursor-pointer">
                 <input 
-                  type="range" min={0} max={duration || 100} value={currentTime || 0} 
+                  type="range" min={0} max={duration || 100} value={currentTime} 
                   onMouseDown={() => setIsDragging(true)} onMouseUp={() => setIsDragging(false)} 
                   onTouchStart={() => setIsDragging(true)} onTouchEnd={() => setIsDragging(false)} 
                   onChange={handleSeek} className="w-full h-full bg-transparent appearance-none cursor-pointer z-20 absolute inset-0 opacity-0" 
                 />
                 <div className="w-full h-1.5 bg-zinc-700 rounded-full pointer-events-none transition-all relative flex items-center">
-                  <div className="h-full bg-white rounded-full pointer-events-none relative flex items-center justify-end" style={{ width: duration > 0 ? `${((currentTime || 0) / duration) * 100}%` : '0%' }}>
+                  <div className="h-full bg-white rounded-full pointer-events-none relative flex items-center justify-end" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}>
                     <div className={`w-3.5 h-3.5 bg-white rounded-full absolute -right-1.5 shadow-md z-10 transition-transform duration-200 ${isDragging ? 'scale-150' : 'scale-100'}`}></div>
                   </div>
                 </div>
@@ -1802,7 +1755,7 @@ function MainApp() {
                     </div>
 
                     <div className="flex flex-col border-t border-white/5 pt-2">
-                      {(queue || []).length > 0 ? (queue || []).map((qSong, idx) => {
+                      {queue && queue.length > 0 ? queue.map((qSong, idx) => {
                         const isCurrent = qSong.id === currentSong?.id;
                         return (
                         <div 
