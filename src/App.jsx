@@ -99,7 +99,7 @@ function MainApp() {
   const isSeekingRef = useRef(false);
   
   const nextAudioUrlRef = useRef(null);
-  const API_BASE = "https://music-app-production-60db.up.railway.app";
+  const API_BASE = "https://music-app-production-3507.up.railway.app";
 
   const adzanPausedTimeRef = useRef(0);
   const adzanEndTimeRef = useRef(0);

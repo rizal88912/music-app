@@ -6,7 +6,7 @@ const { HttpsProxyAgent } = require('https-proxy-agent'); // 🛡️ Topeng IP I
 const app = express();
 app.use(cors());
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 
 // 🔥 INI DIA 34 NYAWA VIP LU SEKARANG (TOTAL 17.000 REQUEST/BULAN) 🔥
 const apiKeys = [
@@ -210,7 +210,7 @@ app.get('/api/bypass-cors', async (req, res) => {
                     return line.replace(/URI="([^"]+)"/, (match, uri) => {
                         try {
                             const absoluteKeyUrl = new URL(uri, targetUrl).href;
-                            const proxyKeyUrl = `https://music-app-production-60db.up.railway.app/api/bypass-cors?url=${encodeURIComponent(absoluteKeyUrl)}`;
+                            const proxyKeyUrl = `https://music-app-production-3507.up.railway.app/api/bypass-cors?url=${encodeURIComponent(absoluteKeyUrl)}`;
                             return `URI="${proxyKeyUrl}"`;
                         } catch(e) {
                             return match; // Kalo error biarin link aslinya
@@ -224,7 +224,7 @@ app.get('/api/bypass-cors', async (req, res) => {
                 // 3. Paksa semua link video anak (.ts) lewat proxy Railway lu
                 try {
                     const absoluteUrl = new URL(line, targetUrl).href;
-                    return `https://music-app-production-60db.up.railway.app/api/bypass-cors?url=${encodeURIComponent(absoluteUrl)}`;
+                    return `https://music-app-production-3507.up.railway.app/api/bypass-cors?url=${encodeURIComponent(absoluteUrl)}`;
                 } catch(e) {
                     return line;
                 }
@@ -310,7 +310,7 @@ app.get('/api/get-premium-channel', async (req, res) => {
         // Kalau sukses dapet link ber-token, sikat!
         if (streamUrl) {
             console.log(`✅ Berhasil nyolong token ${channel.toUpperCase()} pakai Proxy Indo!`);
-            const bypassedPremiumUrl = `https://music-app-production-60db.up.railway.app/api/bypass-cors?url=${encodeURIComponent(streamUrl)}`;
+            const bypassedPremiumUrl = `https://music-app-production-3507.up.railway.app/api/bypass-cors?url=${encodeURIComponent(streamUrl)}`;
             return res.json({ success: true, url: bypassedPremiumUrl });
         } else {
             return res.status(404).json({ success: false, message: 'API lagi dijaga ketat, token gagal diambil.' });
