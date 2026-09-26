@@ -285,18 +285,17 @@ function MainApp() {
   });
 
   const iframeRef = useRef(null);
+  const keepAliveAudioRef = useRef(null);
   
   // 🔥 INSISIALISASI MESIN CLAUDE 🔥
   const engineRef = useRef(null);
   const getActiveAudio = () => engineRef.current ? engineRef.current.getActiveAudio() : null;
 
-  const keepAliveAudioRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const isSeekingRef = useRef(false);
 
   const adzanPausedTimeRef = useRef(0);
   const adzanEndTimeRef = useRef(0);
-  const adzanOriginalLoopRef = useRef(false);
   const workerRef = useRef(null); 
   
   const [currentTime, setCurrentTime] = useState(0);
@@ -336,69 +335,6 @@ function MainApp() {
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // 🔥 FUNGSI UI UNTUK MENANGKAP EVENT DARI MESIN 🔥
-  const handleTimeUpdate = (e) => {
-      if (isAdzanPlayingRef.current) {
-          if (Date.now() >= adzanEndTimeRef.current) {
-              dismissAdzanPause(); return;
-          }
-          if (e.target.currentTime > adzanPausedTimeRef.current + 0.5) {
-              e.target.currentTime = adzanPausedTimeRef.current;
-          }
-          return; 
-      }
-      const newTime = e.target.currentTime;
-      const prevTime = currentTimeRef.current;
-      if (!isDragging && mediaMode === 'audio') {
-          if (Math.abs(prevTime - newTime) >= 0.5) {
-              setCurrentTime(newTime);
-              currentTimeRef.current = newTime;
-          }
-      }
-  };
-
-  const handleLoadedMetadata = (e) => {
-      if (mediaMode === 'audio') setDuration(e.target.duration);
-  };
-  
-  const handleError = (e) => {
-      const err = e.error;
-      if (!err) return;
-      if (err.code === 1 || err.code === 20 || err.message?.includes('aborted')) return; 
-      console.error("Audio Error Murni:", err);
-      if (mediaMode === 'audio' && currentSong?.id) {
-          setIsBuffering(false);
-          usePlayerStore.setState({ isPlaying: false });
-          showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
-      }
-  };
-  
-  const handleWaiting = (e) => { setIsBuffering(true); };
-  
-  const handlePlaying = (e) => {
-      setIsBuffering(false);
-      if (currentSong) engineRef.current?.updateMediaSession?.(currentSong);
-      if (!isAdzanPlayingRef.current) {
-          usePlayerStore.setState({ isPlaying: true });
-          if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
-              keepAliveAudioRef.current.play().catch(()=>{});
-          }
-      }
-  };
-  
-  const handlePause = (e) => {
-      if (isTransitioningRef.current) return; 
-      if (!isAdzanPlayingRef.current) {
-          usePlayerStore.setState({ isPlaying: false });
-      }
-  };
-
-  // Referensi memori untuk menghindari stale closure
-  const engineCallbacksRef = useRef({ handleTimeUpdate, handleLoadedMetadata, handlePlaying, handlePause, handleWaiting, handleError });
-  useEffect(() => {
-      engineCallbacksRef.current = { handleTimeUpdate, handleLoadedMetadata, handlePlaying, handlePause, handleWaiting, handleError };
-  });
-
   // 🔥 SETUP ENGINE CLAUDE (Dijalankan sekali di awal) 🔥
   useEffect(() => {
       engineRef.current = new AudioEngine(
@@ -410,13 +346,29 @@ function MainApp() {
           }
       );
 
-      // Sambungkan event engine ke UI React secara aman
-      engineRef.current.onTimeUpdate = (el) => engineCallbacksRef.current.handleTimeUpdate({ target: el });
-      engineRef.current.onDurationChange = (el) => engineCallbacksRef.current.handleLoadedMetadata({ target: el });
-      engineRef.current.onPlaying = () => engineCallbacksRef.current.handlePlaying({ target: engineRef.current.getActiveAudio() });
-      engineRef.current.onPause = () => engineCallbacksRef.current.handlePause({ target: engineRef.current.getActiveAudio() });
-      engineRef.current.onWaiting = () => engineCallbacksRef.current.handleWaiting({ target: engineRef.current.getActiveAudio() });
-      engineRef.current.onError = (e) => engineCallbacksRef.current.handleError({ target: engineRef.current.getActiveAudio(), error: e });
+      // Sambungkan event engine ke UI React
+      engineRef.current.onTimeUpdate = (el) => {
+          if (isAdzanPlayingRef.current) {
+              if (Date.now() >= adzanEndTimeRef.current) { dismissAdzanPause(); return; }
+              if (el.currentTime > adzanPausedTimeRef.current + 0.5) el.currentTime = adzanPausedTimeRef.current;
+              return; 
+          }
+          if (!isDragging && mediaModeRef.current === 'audio') {
+              if (Math.abs(currentTimeRef.current - el.currentTime) >= 0.5) {
+                  setCurrentTime(el.currentTime);
+                  currentTimeRef.current = el.currentTime;
+              }
+          }
+      };
+      engineRef.current.onDurationChange = (el) => setDuration(el.duration);
+      engineRef.current.onPlaying = () => { setIsBuffering(false); usePlayerStore.setState({ isPlaying: true }); };
+      engineRef.current.onPause = () => usePlayerStore.setState({ isPlaying: false });
+      engineRef.current.onWaiting = () => setIsBuffering(true);
+      engineRef.current.onError = (e) => {
+          setIsBuffering(false);
+          usePlayerStore.setState({ isPlaying: false });
+          showToast("❌ Sinyal audio terputus.");
+      };
 
       return () => { if (engineRef.current) engineRef.current.destroy(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -490,6 +442,11 @@ function MainApp() {
       };
   }, []);
 
+  const showToast = (msg) => {
+      setToastMsg(msg);
+      setTimeout(() => setToastMsg(""), 3500);
+  };
+
   const dismissAdzanPause = () => {
       if (!isAdzanPlayingRef.current) return;
       isAdzanPlayingRef.current = false;
@@ -497,17 +454,16 @@ function MainApp() {
       adzanEndTimeRef.current = 0;
       
       if (wasPlayingBeforeAdzan.current) {
-          const active = getActiveAudio();
           if (mediaModeRef.current === 'video') {
               usePlayerStore.setState({ isPlaying: true });
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
               showToast('▶️ Waktu Adzan selesai. Melanjutkan video...');
               if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           } else {
+              const active = getActiveAudio();
               if (active) {
                   active.muted = false;
                   active.volume = 1;
-                  active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
@@ -533,10 +489,8 @@ function MainApp() {
           } else {
               if (active) {
                   adzanPausedTimeRef.current = active.currentTime;
-                  adzanOriginalLoopRef.current = active.loop;
                   active.muted = true;
                   active.volume = 0;
-                  active.loop = true; 
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
@@ -1120,9 +1074,10 @@ function MainApp() {
   }, [mediaMode, isPlaying, currentSong?.id]);
 
   useEffect(() => {
-    if (!currentSong?.id) { setIsLiked(false); setAudioStreamUrl(null); return; }
+    if (!currentSong?.id) { setIsLiked(false); return; }
 
     setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
+    setIsBuffering(true);
 
     const likedSongs = JSON.parse(localStorage.getItem('ytm_liked_songs') || '[]');
     setIsLiked(likedSongs.some(song => song.id === currentSong.id));
@@ -1258,7 +1213,6 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 DAFTARKAN LISTENER LOCKSCREEN HANYA 1 KALI 🔥
   const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
   
   useEffect(() => {
