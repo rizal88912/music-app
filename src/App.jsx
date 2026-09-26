@@ -155,7 +155,6 @@ function MainApp() {
       if (nextSong) {
           const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
           nextAudioUrlRef.current = originalUrl;
-          // Panggil fetch ringan biar numpuk di cache disk browser, bukan di RAM (nggak pakai Blob)
           fetch(originalUrl).catch(() => {});
       } else {
           nextAudioUrlRef.current = null;
@@ -389,7 +388,6 @@ function MainApp() {
     isTransitioningRef.current = true;
     const originalUrl = `${API_BASE}/api/audio?id=${songId}`;
     
-    // Gak pake blob lagi, langsung pakai URL aslinya biar enteng di RAM
     audioEl.src = originalUrl;
     
     audioEl.load();
@@ -401,6 +399,37 @@ function MainApp() {
     } else {
         isTransitioningRef.current = false;
     }
+  };
+
+  // 🔥 JURUS PAMUNGKAS SINKRONISASI METADATA UNTUK IOS & ANDROID 🔥
+  const updateMediaSession = (song) => {
+    if (!('mediaSession' in navigator) || !song) return;
+
+    let a = song.artist || "Artis";
+    a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
+    if (!a || a.toLowerCase() === 'youtube') {
+        if (song.title && song.title.includes('-')) {
+            a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+        }
+    }
+
+    let t = song.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
+    if (t.includes('-')) {
+       let parts = t.split('-');
+       if (parts[0].toLowerCase().includes(a.toLowerCase())) t = parts.slice(1).join('-');
+       else if (parts[1] && parts[1].toLowerCase().includes(a.toLowerCase())) t = parts[0];
+       else t = parts.slice(1).join('-');
+    }
+    t = t.trim() || song.title;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: t,
+      artist: a,
+      album: 'RnCmusic Premium',
+      artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
+    });
+    // Pancingan buat iOS kadang butuh title web diganti
+    document.title = `${t} - ${a}`;
   };
 
   const handleNextLocal = (e) => {
@@ -415,6 +444,7 @@ function MainApp() {
       const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
+          updateMediaSession(nextSong); // 🔥 SUNTIK METADATA SINKRON! Gak nunggu React Render!
           const active = getActiveAudio();
           if (active) {
               active.src = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
@@ -434,7 +464,12 @@ function MainApp() {
           handleSeek({ target: { value: 0 } });
       } else {
           isTransitioningRef.current = true;
-          usePlayerStore.getState().playPrev();
+          const st = usePlayerStore.getState();
+          const prevIdx = st.currentIndex - 1;
+          if (prevIdx >= 0 && st.queue[prevIdx]) {
+              updateMediaSession(st.queue[prevIdx]); // 🔥 SUNTIK METADATA SINKRON!
+          }
+          st.playPrev();
           setTimeout(() => { isTransitioningRef.current = false; }, 1000);
       }
   };
@@ -445,7 +480,6 @@ function MainApp() {
 
       if (isPlaying) {
           getActiveAudio()?.pause();
-          // Pause manual gak apa-apa, tapi kalau mati sendiri karena lagu habis jangan di pause
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
@@ -472,6 +506,7 @@ function MainApp() {
           setIsExpanded(true); 
           return; 
       }
+      updateMediaSession(qSong); // 🔥 SUNTIK METADATA SINKRON!
       usePlayerStore.getState().playSong(qSong, queue, idx);
       setIsExpanded(true); 
   };
@@ -503,6 +538,8 @@ function MainApp() {
             if (!isDup) { cleanQueue.push(t); if (tTitle.length > 3) usedTitles.add(tTitle); }
         });
       }
+
+      updateMediaSession(song); // 🔥 SUNTIK METADATA SINKRON!
 
       if (cleanQueue.length <= 3) {
           usePlayerStore.getState().playSong(song, cleanQueue, 0);
@@ -888,6 +925,13 @@ function MainApp() {
       return () => { clearTimeout(t1); };
   }, [mediaMode, isPlaying, currentSong?.id]);
 
+  // 2. Update Metadata hanya saat lagu berganti (Sebagai Fallback)
+  useEffect(() => {
+    if (currentSong) {
+      updateMediaSession(currentSong);
+    }
+  }, [currentSong]);
+
   useEffect(() => {
     if (!currentSong?.id) { setIsLiked(false); setAudioStreamUrl(null); return; }
 
@@ -1044,53 +1088,36 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 KONTROL LOCKSCREEN & NOTIFIKASI (SUPPORT KHUSUS IPHONE/IOS) 🔥
+  // 🔥 KONTROL LOCKSCREEN & NOTIFIKASI (SUPER VIP UNTUK IPHONE & ANDROID) 🔥
+  const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
+  
+  // Selalu update referensi fungsi ke yang paling baru tanpa memicu render ulang
   useEffect(() => {
-    if ('mediaSession' in navigator && currentSong) {
-      // Set Metadata cukup SEKALI aja tiap ganti lagu (iOS benci kalau di-loop/pompa terus)
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: displayTitle,
-        artist: displayArtist,
-        album: 'RnCmusic Premium',
-        artwork: [{ src: currentSong.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
-      });
-    }
-  }, [currentSong?.id, displayTitle, displayArtist]);
+    handlersRef.current = { toggle: handleTogglePlayLocal, next: handleNextLocal, prev: handlePrevLocal, seek: handleSeek };
+  });
 
+  // 1. Daftarkan tombol Lockscreen SEKALI SAJA saat aplikasi pertama kali dimuat (Syarat Mutlak iOS)
   useEffect(() => {
     if ('mediaSession' in navigator) {
-      // Update status play/pause terpisah biar lebih responsif
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-      
-      // Tombol Play di Lockscreen (Langsung tembak ke Audio Element biar iOS/iPhone gak nolak)
-      navigator.mediaSession.setActionHandler('play', () => { 
-        const active = getActiveAudio();
-        if (active) {
-            active.play().then(() => {
-                usePlayerStore.setState({ isPlaying: true });
-                if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{}); 
-            }).catch(()=>{ handleTogglePlayLocal(null); });
-        } else {
-            handleTogglePlayLocal(null);
-        }
-      });
-
-      // Tombol Pause di Lockscreen
+      navigator.mediaSession.setActionHandler('play', () => handlersRef.current.toggle && handlersRef.current.toggle(null));
       navigator.mediaSession.setActionHandler('pause', () => { 
         const active = getActiveAudio();
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
       });
-
-      navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevLocal(null));
-      navigator.mediaSession.setActionHandler('nexttrack', () => handleNextLocal(null));
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        handleSeek({ target: { value: details.seekTime } });
-      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
+      navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
+      navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPlaying, currentSong?.id]); // Hanya dipanggil kalau status play atau lagunya ganti
+  }, []); // <-- Array kosong [] ini rahasianya biar iPhone gak nge-kill widget
+
+  // 3. Update status Play/Pause secara independen
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
 
   const handleTimeUpdate = (e) => {
       if (e.target !== getActiveAudio()) return;
@@ -1109,8 +1136,6 @@ function MainApp() {
       const newTime = e.target.currentTime;
       const currentDur = e.target.duration || 0;
       const prevTime = currentTimeRef.current;
-
-      // 🔥 BLOK WAKTU PAKSAAN UDAH DIHAPUS BIAR HP NGGAK MARAH 🔥
 
       if (!isDragging && mediaMode === 'audio') {
           if (Math.abs(prevTime - newTime) >= 0.5) {
@@ -1169,7 +1194,6 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          // 🔥 MESIN SILENT JANGAN DIMATIKAN DISINI BIAR HP GAK TIDUR PAS BUFFERING/TRANSISI 🔥
       }
   };
 
@@ -1197,7 +1221,11 @@ function MainApp() {
         onEnded={() => {
             const st = usePlayerStore.getState();
             if (st.repeatMode === 'one') {
-                if (audioRef.current) { audioRef.current.currentTime = 0; audioRef.current.play(); }
+                if (audioRef.current) { 
+                    audioRef.current.currentTime = 0; 
+                    audioRef.current.play(); 
+                    updateMediaSession(currentSong);
+                }
             } else {
                 handleNextLocal(null);
             }
