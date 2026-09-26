@@ -1112,18 +1112,7 @@ function MainApp() {
       const currentDur = e.target.duration || 0;
       const prevTime = currentTimeRef.current;
 
-      if (currentDur > 10 && !isSeekingRef.current) {
-          if (prevTime >= currentDur - 8 && newTime < 5) {
-              if (isTransitioningRef.current) return;
-              
-              const st = usePlayerStore.getState();
-              if (st.repeatMode !== 'one') {
-                  isTransitioningRef.current = true;
-                  handleNextLocal(null); 
-                  return; 
-              }
-          }
-      }
+      // 🔥 BLOK WAKTU PAKSAAN UDAH DIHAPUS BIAR HP NGGAK MARAH 🔥
 
       if (!isDragging && mediaMode === 'audio') {
           if (Math.abs(prevTime - newTime) >= 0.5) {
@@ -1209,7 +1198,15 @@ function MainApp() {
 
       {/* 🔥 MAIN ENGINE 🔥 */}
       <audio
-        ref={audioRef} playsInline preload="auto" loop={true}
+        ref={audioRef} playsInline preload="auto"
+        onEnded={() => {
+            const st = usePlayerStore.getState();
+            if (st.repeatMode === 'one') {
+                if (audioRef.current) { audioRef.current.currentTime = 0; audioRef.current.play(); }
+            } else {
+                handleNextLocal(null);
+            }
+        }}
         onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata}
         onCanPlay={handleCanPlay} onError={handleError}
         onWaiting={handleWaiting} onPlaying={handlePlaying} onPause={handlePause} className="hidden"
