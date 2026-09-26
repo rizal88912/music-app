@@ -1044,35 +1044,53 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 POMPA METADATA SETIAP DETIK (JURUS KUNCI MAGIC RING XOS!) 🔥
+  // 🔥 KONTROL LOCKSCREEN & NOTIFIKASI (SUPPORT KHUSUS IPHONE/IOS) 🔥
   useEffect(() => {
     if ('mediaSession' in navigator && currentSong) {
-      const updateMetadata = () => {
-          navigator.mediaSession.metadata = new MediaMetadata({
-            title: displayTitle,
-            artist: displayArtist,
-            album: 'RnCmusic Premium',
-            artwork: [{ src: currentSong.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
-          });
-          navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-      };
-      
-      updateMetadata(); // Eksekusi pertama
-      
-      // Paksa refresh tiap 1.5 detik biar Magic Ring nggak kedip/mati!
-      const pumpInterval = setInterval(updateMetadata, 1500); 
+      // Set Metadata cukup SEKALI aja tiap ganti lagu (iOS benci kalau di-loop/pompa terus)
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: displayTitle,
+        artist: displayArtist,
+        album: 'RnCmusic Premium',
+        artwork: [{ src: currentSong.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
+      });
+    }
+  }, [currentSong?.id, displayTitle, displayArtist]);
 
-      navigator.mediaSession.setActionHandler('play', () => { handleTogglePlayLocal(null); });
-      navigator.mediaSession.setActionHandler('pause', () => { handleTogglePlayLocal(null); });
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      // Update status play/pause terpisah biar lebih responsif
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+      
+      // Tombol Play di Lockscreen (Langsung tembak ke Audio Element biar iOS/iPhone gak nolak)
+      navigator.mediaSession.setActionHandler('play', () => { 
+        const active = getActiveAudio();
+        if (active) {
+            active.play().then(() => {
+                usePlayerStore.setState({ isPlaying: true });
+                if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{}); 
+            }).catch(()=>{ handleTogglePlayLocal(null); });
+        } else {
+            handleTogglePlayLocal(null);
+        }
+      });
+
+      // Tombol Pause di Lockscreen
+      navigator.mediaSession.setActionHandler('pause', () => { 
+        const active = getActiveAudio();
+        if (active) active.pause();
+        if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+        usePlayerStore.setState({ isPlaying: false });
+      });
+
       navigator.mediaSession.setActionHandler('previoustrack', () => handlePrevLocal(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handleNextLocal(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         handleSeek({ target: { value: details.seekTime } });
       });
-
-      return () => clearInterval(pumpInterval); // Bersihin pas unmount
     }
-  }, [currentSong, displayTitle, displayArtist, isShuffle, isPlaying]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, currentSong?.id]); // Hanya dipanggil kalau status play atau lagunya ganti
 
   const handleTimeUpdate = (e) => {
       if (e.target !== getActiveAudio()) return;
