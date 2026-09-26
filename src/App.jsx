@@ -145,7 +145,7 @@ function MainApp() {
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // 🔥 PRELOAD LAGU SELANJUTNYA (VERSI ANTI RAM JEBOL) 🔥
+  // 🔥 PRELOAD LAGU SELANJUTNYA (ANTI RAM JEBOL) 🔥
   useEffect(() => {
       if (queue.length === 0) return;
       let nextIdx = currentIndex + 1;
@@ -428,7 +428,7 @@ function MainApp() {
       album: 'RnCmusic Premium',
       artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
     });
-    // Pancingan buat iOS kadang butuh title web diganti
+    // Pancingan buat iOS/Android biar widget tetep "melek"
     document.title = `${t} - ${a}`;
   };
 
@@ -444,7 +444,7 @@ function MainApp() {
       const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
-          updateMediaSession(nextSong); // 🔥 SUNTIK METADATA SINKRON! Gak nunggu React Render!
+          updateMediaSession(nextSong); // 🔥 SUNTIK METADATA LANGSUNG!
           const active = getActiveAudio();
           if (active) {
               active.src = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
@@ -467,7 +467,7 @@ function MainApp() {
           const st = usePlayerStore.getState();
           const prevIdx = st.currentIndex - 1;
           if (prevIdx >= 0 && st.queue[prevIdx]) {
-              updateMediaSession(st.queue[prevIdx]); // 🔥 SUNTIK METADATA SINKRON!
+              updateMediaSession(st.queue[prevIdx]); // 🔥 SUNTIK METADATA LANGSUNG!
           }
           st.playPrev();
           setTimeout(() => { isTransitioningRef.current = false; }, 1000);
@@ -506,7 +506,7 @@ function MainApp() {
           setIsExpanded(true); 
           return; 
       }
-      updateMediaSession(qSong); // 🔥 SUNTIK METADATA SINKRON!
+      updateMediaSession(qSong); // 🔥 SUNTIK METADATA LANGSUNG!
       usePlayerStore.getState().playSong(qSong, queue, idx);
       setIsExpanded(true); 
   };
@@ -539,7 +539,7 @@ function MainApp() {
         });
       }
 
-      updateMediaSession(song); // 🔥 SUNTIK METADATA SINKRON!
+      updateMediaSession(song); // 🔥 SUNTIK METADATA LANGSUNG!
 
       if (cleanQueue.length <= 3) {
           usePlayerStore.getState().playSong(song, cleanQueue, 0);
@@ -1137,6 +1137,26 @@ function MainApp() {
       const currentDur = e.target.duration || 0;
       const prevTime = currentTimeRef.current;
 
+      // 🔥 JURUS RAHASIA IOS: DETEKSI LOOP KARENA AUDIO BROWSER GAK BOLEH BERHENTI 🔥
+      if (currentDur > 10 && !isSeekingRef.current && !isDragging) {
+          // Kalau track muter balik ke awal (tanda lagu udah habis dan nge-loop)
+          if (prevTime >= currentDur - 3 && newTime < 2) {
+              if (isTransitioningRef.current) return;
+              
+              const st = usePlayerStore.getState();
+              if (st.repeatMode === 'one') {
+                 // Biarin aja nge-loop
+                 setCurrentTime(newTime);
+                 currentTimeRef.current = newTime;
+                 return;
+              } else {
+                 isTransitioningRef.current = true;
+                 handleNextLocal(null);
+                 return;
+              }
+          }
+      }
+
       if (!isDragging && mediaMode === 'audio') {
           if (Math.abs(prevTime - newTime) >= 0.5) {
               setCurrentTime(newTime);
@@ -1194,6 +1214,7 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
+          // 🔥 MESIN SILENT JANGAN DIMATIKAN DISINI BIAR HP GAK TIDUR PAS BUFFERING/TRANSISI 🔥
       }
   };
 
@@ -1217,7 +1238,7 @@ function MainApp() {
 
       {/* 🔥 MAIN ENGINE 🔥 */}
       <audio
-        ref={audioRef} playsInline preload="auto"
+        ref={audioRef} playsInline preload="auto" loop={true}
         onEnded={() => {
             const st = usePlayerStore.getState();
             if (st.repeatMode === 'one') {
