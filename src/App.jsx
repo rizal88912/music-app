@@ -90,10 +90,13 @@ function MainApp() {
   const iframeRef = useRef(null);
   const audioRef = useRef(null);
   const getActiveAudio = () => audioRef.current;
+  
   const keepAliveAudioRef = useRef(null);
   const isTransitioningRef = useRef(false);
   const isSeekingRef = useRef(false);
+  
   const nextAudioUrlRef = useRef(null);
+  const preloadedBlobUrlRef = useRef(null);
   const API_BASE = "https://music-app-production-3507.up.railway.app";
 
   const adzanPausedTimeRef = useRef(0);
@@ -140,7 +143,7 @@ function MainApp() {
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // 🔥 PRELOAD NATIVE (0% RAM, HP GAK NGAMBEK) 🔥
+  // 🔥 JURUS DEWA BLOB MEMORY: JANGAN ADA JEDA WALAUPUN 1 MILIDETIK 🔥
   useEffect(() => {
       if (queue.length === 0) return;
       let nextIdx = currentIndex + 1;
@@ -149,16 +152,21 @@ function MainApp() {
 
       if (nextSong) {
           const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
-          let prefetchLink = document.getElementById('next-audio-prefetch');
-          if (!prefetchLink) {
-              prefetchLink = document.createElement('link');
-              prefetchLink.id = 'next-audio-prefetch';
-              prefetchLink.rel = 'prefetch';
-              prefetchLink.as = 'audio';
-              document.head.appendChild(prefetchLink);
-          }
-          prefetchLink.href = originalUrl;
-          nextAudioUrlRef.current = originalUrl;
+          
+          // Diam-diam download lagu di background ke RAM biar HP gak usah loading lagi pas ganti
+          fetch(originalUrl)
+            .then(res => res.blob())
+            .then(blob => {
+                if (preloadedBlobUrlRef.current) {
+                    URL.revokeObjectURL(preloadedBlobUrlRef.current); // Bersihin RAM lama
+                }
+                const blobUrl = URL.createObjectURL(blob); // Sulap jadi link memori lokal
+                preloadedBlobUrlRef.current = blobUrl;
+                nextAudioUrlRef.current = blobUrl; 
+            })
+            .catch(() => {
+                nextAudioUrlRef.current = originalUrl; // Kalau gagal, tetep pake link biasa
+            });
       } else {
           nextAudioUrlRef.current = null;
       }
@@ -381,22 +389,7 @@ function MainApp() {
     return () => { worker.postMessage({ cmd: 'stop' }); worker.terminate(); };
   }, [adzanMode, prayerTimes]);
 
-  const loadAudioSource = async (audioEl, songId, autoPlay = false) => {
-    if (!audioEl || !songId) return;
-    isTransitioningRef.current = true;
-    audioEl.src = `${API_BASE}/api/audio?id=${songId}`;
-    audioEl.load();
-    if (autoPlay && !isAdzanPlayingRef.current) {
-        audioEl.play().then(() => {
-            usePlayerStore.setState({ isPlaying: true });
-            isTransitioningRef.current = false;
-        }).catch(()=>{ isTransitioningRef.current = false; });
-    } else {
-        isTransitioningRef.current = false;
-    }
-  };
-
-  // 🔥 JURUS PAMUNGKAS SINKRONISASI METADATA UNTUK IOS & ANDROID 🔥
+  // 🔥 UPDATE METADATA (SINKRON!) 🔥
   const updateMediaSession = (song) => {
     if (!('mediaSession' in navigator) || !song) return;
 
@@ -423,7 +416,6 @@ function MainApp() {
       album: 'RnCmusic Premium',
       artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
     });
-    // Wajib: Paksa state jadi playing saat metadata ganti biar Dynamic Bar kesetrum melek
     navigator.mediaSession.playbackState = 'playing';
     document.title = `${t} - ${a}`;
   };
@@ -439,14 +431,12 @@ function MainApp() {
       const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
-          updateMediaSession(nextSong); // 🔥 SUNTIK METADATA LANGSUNG SEBELUM AUDIO BERUBAH!
+          updateMediaSession(nextSong); 
           const active = getActiveAudio();
           if (active) {
-              const newSrc = `${API_BASE}/api/audio?id=${nextSong.id}`;
-              if (!active.src.includes(nextSong.id)) {
-                  active.src = newSrc;
-                  active.load();
-              }
+              const newSrc = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
+              active.src = newSrc;
+              active.load();
               active.play().then(() => {
                   isTransitioningRef.current = false;
                   usePlayerStore.setState({ isPlaying: true });
@@ -743,6 +733,7 @@ function MainApp() {
         combined.filter(t => t.type === 'video' && !isBadMix(t.title)).forEach(t => {
             const validId = t.id || t.videoId || (t.url ? t.url.split('v=')[1] : null);
             if (!validId || usedIds.has(validId)) return;
+            
             let tCleanT = t.title.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '');
             if (tCleanT.includes('-')) tCleanT = tCleanT.split('-')[1];
             tCleanT = tCleanT.trim();
@@ -923,7 +914,10 @@ function MainApp() {
       return () => { clearTimeout(t1); };
   }, [mediaMode, isPlaying, currentSong?.id]);
 
-  // JANGAN ADA DOUBLE ASSIGNMENT SRC DI SINI BIAR BROWSER GAK BINGUNG
+  useEffect(() => {
+    if (currentSong) updateMediaSession(currentSong);
+  }, [currentSong]);
+
   useEffect(() => {
     if (!currentSong?.id) { setIsLiked(false); setAudioStreamUrl(null); return; }
 
@@ -1071,7 +1065,7 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 KONTROL LOCKSCREEN & NOTIFIKASI (SUPER VIP UNTUK IPHONE & ANDROID) 🔥
+  // 🔥 KONTROL LOCKSCREEN SINKRON 🔥
   const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
   
   useEffect(() => {
@@ -1116,24 +1110,6 @@ function MainApp() {
       const newTime = e.target.currentTime;
       const currentDur = e.target.duration || 0;
       const prevTime = currentTimeRef.current;
-
-      // 🔥 JURUS DEWA: PREEMPTIVE STRIKE (TEMBAK SEBELUM HABIS) 🔥
-      if (currentDur > 10 && !isSeekingRef.current && !isDragging) {
-          if (newTime >= currentDur - 0.5) {
-              if (isTransitioningRef.current) return;
-              
-              const st = usePlayerStore.getState();
-              if (st.repeatMode === 'one') {
-                 setCurrentTime(newTime);
-                 currentTimeRef.current = newTime;
-                 return;
-              } else {
-                 isTransitioningRef.current = true;
-                 handleNextLocal(null);
-                 return;
-              }
-          }
-      }
 
       if (!isDragging && mediaMode === 'audio') {
           if (Math.abs(prevTime - newTime) >= 0.5) {
@@ -1213,9 +1189,9 @@ function MainApp() {
       {/* 🔥 ALWAYS-ON SILENT ENGINE 🔥 */}
       <audio ref={keepAliveAudioRef} src={SILENT_MP3} loop playsInline className="hidden" />
 
-      {/* 🔥 MAIN ENGINE DENGAN LOOP DEWA 🔥 */}
+      {/* 🔥 MAIN AUDIO PAKAI ONENDED MURNI 🔥 */}
       <audio
-        ref={audioRef} playsInline preload="auto" loop={true}
+        ref={audioRef} playsInline preload="auto"
         onEnded={() => {
             const st = usePlayerStore.getState();
             if (st.repeatMode === 'one') {
