@@ -145,7 +145,7 @@ function MainApp() {
 
   useEffect(() => { mediaModeRef.current = mediaMode; }, [mediaMode]);
 
-  // PRELOAD LAGU SELANJUTNYA 
+  // 🔥 PRELOAD LAGU SELANJUTNYA (VERSI ANTI RAM JEBOL) 🔥
   useEffect(() => {
       if (queue.length === 0) return;
       let nextIdx = currentIndex + 1;
@@ -154,24 +154,9 @@ function MainApp() {
 
       if (nextSong) {
           const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
-          caches.open('rncmusic-offline-audio').then(cache => {
-              cache.match(originalUrl).then(res => {
-                  if (res) {
-                      res.blob().then(blob => {
-                          nextAudioUrlRef.current = URL.createObjectURL(blob) + `#id=${nextSong.id}`;
-                      });
-                  } else {
-                      fetch(originalUrl).then(networkRes => {
-                          if (networkRes.ok) {
-                              cache.put(originalUrl, networkRes.clone());
-                              networkRes.blob().then(blob => {
-                                  nextAudioUrlRef.current = URL.createObjectURL(blob) + `#id=${nextSong.id}`;
-                              });
-                          }
-                      }).catch(() => { nextAudioUrlRef.current = originalUrl; });
-                  }
-              }).catch(() => { nextAudioUrlRef.current = originalUrl; });
-          }).catch(() => { nextAudioUrlRef.current = originalUrl; });
+          nextAudioUrlRef.current = originalUrl;
+          // Panggil fetch ringan biar numpuk di cache disk browser, bukan di RAM (nggak pakai Blob)
+          fetch(originalUrl).catch(() => {});
       } else {
           nextAudioUrlRef.current = null;
       }
@@ -404,14 +389,8 @@ function MainApp() {
     isTransitioningRef.current = true;
     const originalUrl = `${API_BASE}/api/audio?id=${songId}`;
     
-    try {
-        const cache = await caches.open('rncmusic-offline-audio');
-        const cachedRes = await cache.match(originalUrl);
-        if (cachedRes) {
-            const blob = await cachedRes.blob();
-            audioEl.src = URL.createObjectURL(blob) + `#id=${songId}`;
-        } else { audioEl.src = originalUrl; }
-    } catch (e) { audioEl.src = originalUrl; }
+    // Gak pake blob lagi, langsung pakai URL aslinya biar enteng di RAM
+    audioEl.src = originalUrl;
     
     audioEl.load();
     if (autoPlay && !isAdzanPlayingRef.current) {
@@ -466,6 +445,7 @@ function MainApp() {
 
       if (isPlaying) {
           getActiveAudio()?.pause();
+          // Pause manual gak apa-apa, tapi kalau mati sendiri karena lagu habis jangan di pause
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
@@ -1171,10 +1151,7 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          
-          if (keepAliveAudioRef.current) {
-              keepAliveAudioRef.current.pause();
-          }
+          // 🔥 MESIN SILENT JANGAN DIMATIKAN DISINI BIAR HP GAK TIDUR PAS BUFFERING/TRANSISI 🔥
       }
   };
 
