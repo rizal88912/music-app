@@ -95,7 +95,7 @@ class AudioEngine {
     el.preload = 'auto';
     el.playsInline = true;
     
-    // Sambungin event native ke UI lu
+    // Sambungin event native ke UI
     el.addEventListener('timeupdate', () => {
       if (this.elements[this.activeSlot] === el && this.onTimeUpdate) this.onTimeUpdate(el);
       this._watcher(el);
@@ -116,7 +116,6 @@ class AudioEngine {
       if (this.elements[this.activeSlot] === el && this.onError) this.onError(e);
     });
     el.addEventListener('ended', () => {
-      // Fallback kalo crossfade gagal ketangkep
       const st = usePlayerStore.getState();
       if (st.repeatMode === 'one') {
           el.currentTime = 0; el.play().catch(()=>{});
@@ -266,7 +265,7 @@ class AudioEngine {
 // =========================================================================
 
 function MainApp() {
-  const { currentSong, isPlaying, togglePlay, playNext, playPrev, playSong, queue, currentIndex } = usePlayerStore();
+  const { currentSong, isPlaying, queue, currentIndex } = usePlayerStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -455,23 +454,26 @@ function MainApp() {
       adzanEndTimeRef.current = 0;
       
       if (wasPlayingBeforeAdzan.current) {
-          const active = getActiveAudio();
           if (mediaModeRef.current === 'video') {
               usePlayerStore.setState({ isPlaying: true });
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+              showToast('▶️ Waktu Adzan selesai. Melanjutkan video...');
               if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           } else {
+              const active = getActiveAudio();
               if (active) {
                   active.muted = false;
                   active.volume = 1;
                   active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
                   usePlayerStore.setState({ isPlaying: true });
+                  showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
               }
           }
       } else {
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+          showToast('▶️ Waktu Adzan selesai.');
       }
   };
 
@@ -482,10 +484,10 @@ function MainApp() {
 
       if (wasPlayingBeforeAdzan.current) {
           usePlayerStore.setState({ isPlaying: false }); 
-          const active = getActiveAudio();
           if (mediaModeRef.current === 'video') {
               iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           } else {
+              const active = getActiveAudio();
               if (active) {
                   adzanPausedTimeRef.current = active.currentTime;
                   adzanOriginalLoopRef.current = active.loop;
@@ -798,7 +800,7 @@ function MainApp() {
       setContextMenu(p => ({...p, isOpen: false}));
   };
 
-  // 🔥 MURNI RESET UI UNTUK LIRIK DAN WAKTU (TANPA GANGGU AUDIO ENGINE) 🔥
+  // 🔥 UPDATE LOGIC UI LIRIK (TIDAK ADA PERUBAHAN) 🔥
   useEffect(() => {
     if (!currentSong?.id) { setIsLiked(false); return; }
 
@@ -1214,6 +1216,36 @@ function MainApp() {
     const s = Math.floor(time % 60);
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
+
+  // 🔥 DAFTARKAN LISTENER LOCKSCREEN HANYA 1 KALI 🔥
+  const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
+  
+  useEffect(() => {
+    handlersRef.current = { toggle: handleTogglePlayLocal, next: handleNextLocal, prev: handlePrevLocal, seek: handleSeek };
+  });
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => handlersRef.current.toggle && handlersRef.current.toggle(null));
+      navigator.mediaSession.setActionHandler('pause', () => { 
+        const active = getActiveAudio();
+        if (active) active.pause();
+        if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+        usePlayerStore.setState({ isPlaying: false });
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
+      navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
+      navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
+  window.saklarPusat = handleTogglePlayLocal;
 
   return (
     <div className="h-screen bg-[#0f0f0f] text-white flex flex-col font-sans overflow-hidden relative">
