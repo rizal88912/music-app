@@ -29,11 +29,11 @@ jobs:
       - name: Sinkronisasi ke Android
         run: npx cap sync android
 
-      - name: Pasang Java 17
+      - name: Pasang Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
       - name: Proses Build APK!
         working-directory: ./android
