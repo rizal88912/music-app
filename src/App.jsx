@@ -2071,7 +2071,7 @@ function MainApp() {
 
 // 🔥 PINTU GERBANG VIP (LOGIN SCREEN) 🔥
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => safeStorageGet('rnc_vip_access', false));
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('rnc_vip_access') === 'true');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
 
@@ -2089,7 +2089,7 @@ export default function App() {
     ];
 
     if (validCodes.includes(password.toLowerCase().trim())) {
-      safeStorageSet('rnc_vip_access', true);
+      localStorage.setItem('rnc_vip_access', 'true');
       setIsAuthenticated(true);
     } else {
       setError(true);
