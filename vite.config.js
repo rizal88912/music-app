@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  base: './', // <--- INI KUNCI UTAMA ANTI BLANK PUTIH DI APK BANG!
   plugins: [
     react(),
     tailwindcss(),
