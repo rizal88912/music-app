@@ -14,7 +14,7 @@
     "@capacitor/core": "^8.5.2",
     "@distube/ytdl-core": "^4.16.12",
     "@react-oauth/google": "^0.13.5",
-    "cordova-plugin-music-controls2": "^3.0.7",
+    "capacitor-music-controls-plugin": "latest",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "hls.js": "^1.7.1",

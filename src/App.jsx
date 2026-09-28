@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { usePlayerStore } from './store/usePlayerStore';
 
+// 🔥 IMPORT PLUGIN MUSIC MODERN 🔥
+import { MusicControls } from 'capacitor-music-controls-plugin';
+
 import Home from './pages/Home';
 import Search from './pages/Search';
 import Artist from './pages/Artist';
@@ -156,19 +159,18 @@ function MainApp() {
       if (nextSong) {
           const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
           
-          // Diam-diam download lagu di background ke RAM biar HP gak usah loading lagi pas ganti
           fetch(originalUrl)
             .then(res => res.blob())
             .then(blob => {
                 if (preloadedBlobUrlRef.current) {
-                    URL.revokeObjectURL(preloadedBlobUrlRef.current); // Bersihin RAM lama
+                    URL.revokeObjectURL(preloadedBlobUrlRef.current);
                 }
-                const blobUrl = URL.createObjectURL(blob); // Sulap jadi link memori lokal
+                const blobUrl = URL.createObjectURL(blob);
                 preloadedBlobUrlRef.current = blobUrl;
                 nextAudioUrlRef.current = blobUrl; 
             })
             .catch(() => {
-                nextAudioUrlRef.current = originalUrl; // Kalau gagal, tetep pake link biasa
+                nextAudioUrlRef.current = originalUrl;
             });
       } else {
           nextAudioUrlRef.current = null;
@@ -271,8 +273,8 @@ function MainApp() {
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
-                  // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-                  // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
+                  // 🔥 WIDGET NATIVE 🔥
+                  try { MusicControls.updateIsPlaying({ isPlaying: true }); } catch(err) {}
               }
           }
       } else {
@@ -301,8 +303,8 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
-          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          // 🔥 PAUSE WIDGET NATIVE 🔥
+          try { MusicControls.updateIsPlaying({ isPlaying: false }); } catch(err) {}
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -403,10 +405,7 @@ function MainApp() {
     
     isTransitioningRef.current = true;
     const originalUrl = `${API_BASE}/api/audio?id=${songId}`;
-    
-    // Gak pake blob lagi, langsung pakai URL aslinya biar enteng di RAM
     audioEl.src = originalUrl;
-    
     audioEl.load();
     if (autoPlay && !isAdzanPlayingRef.current) {
         audioEl.play().then(() => {
@@ -445,25 +444,20 @@ function MainApp() {
         document.title = `${t} - ${a}`;
     }
 
-    // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-    /*
-    if (typeof window !== 'undefined' && window.MusicControls) {
-        try {
-            window.MusicControls.create({
-                track: t,
-                artist: a,
-                cover: song.image || '',
-                isPlaying: true,
-                dismissable: false,
-                hasPrev: true,
-                hasNext: true,
-                hasClose: false,
-                ticker: `Memutar: ${t}`
-            }, () => {}, () => {});
-            window.MusicControls.updateIsPlaying(true);
-        } catch(err) { console.error("MusicControls Init Error:", err); }
-    }
-    */
+    // 🔥 WIDGET NATIVE PLUGIN MODERN 🔥
+    try {
+        MusicControls.create({
+            track: t,
+            artist: a,
+            cover: song.image || '',
+            isPlaying: true,
+            dismissable: false,
+            hasPrev: true,
+            hasNext: true,
+            hasClose: false,
+            ticker: `Memutar: ${t}`
+        }).catch(()=>{});
+    } catch(err) { console.error("MusicControls Init Error:", err); }
   };
 
   const handleNextLocal = (e) => {
@@ -478,7 +472,7 @@ function MainApp() {
       const nextSong = st.queue[nextIdx];
 
       if (nextSong) {
-          updateMediaSession(nextSong); // Suntik judul widget baru!
+          updateMediaSession(nextSong); 
           const active = getActiveAudio();
           if (active) {
               active.src = nextAudioUrlRef.current || `${API_BASE}/api/audio?id=${nextSong.id}`;
@@ -498,8 +492,6 @@ function MainApp() {
           handleSeek({ target: { value: 0 } });
       } else {
           isTransitioningRef.current = true;
-          
-          // Suntik judul widget lagu sebelumnya
           const st = usePlayerStore.getState();
           const prevIdx = st.currentIndex - 1;
           if(prevIdx >= 0 && st.queue[prevIdx]) {
@@ -517,10 +509,10 @@ function MainApp() {
 
       if (isPlaying) {
           getActiveAudio()?.pause();
-          // Pause manual gak apa-apa, tapi kalau mati sendiri karena lagu habis jangan di pause
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
+          try { MusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       } else {
           const active = getActiveAudio();
           if (active && currentSong && !active.src.includes(currentSong.id)) {
@@ -533,6 +525,7 @@ function MainApp() {
           }
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
           togglePlay();
+          try { MusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
       }
   };
 
@@ -544,7 +537,7 @@ function MainApp() {
           setIsExpanded(true); 
           return; 
       }
-      updateMediaSession(qSong); // Suntik judul widget
+      updateMediaSession(qSong); 
       usePlayerStore.getState().playSong(qSong, queue, idx);
       setIsExpanded(true); 
   };
@@ -577,7 +570,7 @@ function MainApp() {
         });
       }
 
-      updateMediaSession(song); // Suntik judul widget
+      updateMediaSession(song); 
 
       if (cleanQueue.length <= 3) {
           usePlayerStore.getState().playSong(song, cleanQueue, 0);
@@ -967,7 +960,6 @@ function MainApp() {
     if (!currentSong?.id) { setIsLiked(false); setAudioStreamUrl(null); return; }
 
     const activeAudio = getActiveAudio();
-    // Kalau lagunya BUKAN lagu yang baru di-set dari handleNextLocal, baru kita set
     if (activeAudio && !activeAudio.src.includes(currentSong.id)) {
         setCurrentTime(0); currentTimeRef.current = 0; setDuration(0); setLyricOffset(0); setIsSyncMode(false); setLrclibDuration(0); setMediaMode('audio'); setLyricsMode('synced'); 
         setIsBuffering(true);
@@ -1078,7 +1070,6 @@ function MainApp() {
         }
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime, lyrics, activeLyricIndex, lyricOffset, isSyncMode, lyricsMode, isExpanded, activeTab]);
 
   const toggleRepeat = () => {
@@ -1111,7 +1102,6 @@ function MainApp() {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // 🔥 DAFTARKAN LISTENER LOCKSCREEN HANYA 1 KALI 🔥
   const handlersRef = useRef({ toggle: null, next: null, prev: null, seek: null });
   
   useEffect(() => {
@@ -1126,42 +1116,34 @@ function MainApp() {
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
-        // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-        // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+        try { MusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
 
-    // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-    /*
-    if (typeof window !== 'undefined' && window.MusicControls) {
-        window.MusicControls.subscribe((action) => {
-            try {
-                const message = JSON.parse(action).message;
-                switch(message) {
-                    case 'music-controls-next':
-                        handlersRef.current.next && handlersRef.current.next(null);
-                        break;
-                    case 'music-controls-previous':
-                        handlersRef.current.prev && handlersRef.current.prev(null);
-                        break;
-                    case 'music-controls-pause':
-                    case 'music-controls-play':
-                    case 'music-controls-toggle-play-pause':
-                        handlersRef.current.toggle && handlersRef.current.toggle(null);
-                        break;
-                    case 'music-controls-destroy':
-                        break;
-                    default:
-                        break;
-                }
-            } catch (e) {}
+    // 🔥 LISTENER PLUGIN MUSIC MODERN 🔥
+    try {
+        MusicControls.addListener('controlsNotification', (info) => {
+            const message = info.message || info;
+            switch(message) {
+                case 'music-controls-next':
+                    handlersRef.current.next && handlersRef.current.next(null);
+                    break;
+                case 'music-controls-previous':
+                    handlersRef.current.prev && handlersRef.current.prev(null);
+                    break;
+                case 'music-controls-pause':
+                case 'music-controls-play':
+                case 'music-controls-toggle-play-pause':
+                    handlersRef.current.toggle && handlersRef.current.toggle(null);
+                    break;
+                case 'music-controls-destroy':
+                    break;
+            }
         });
-        window.MusicControls.listen();
-    }
-    */
+    } catch (e) {}
   }, []);
 
   useEffect(() => {
@@ -1220,8 +1202,7 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
-          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          try { MusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       }
   };
   
@@ -1234,19 +1215,16 @@ function MainApp() {
       if (e.target !== getActiveAudio()) return;
       setIsBuffering(false);
       
-      // Update widget saat lagu SUDAH BERHASIL dimainkan
       if (currentSong) {
           updateMediaSession(currentSong);
       }
 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: true });
-          
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
-          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
+          try { MusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
       }
   };
   
@@ -1255,8 +1233,7 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
-          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          try { MusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       }
   };
 
