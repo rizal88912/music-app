@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { usePlayerStore } from './store/usePlayerStore';
 
+// 🔥 NGGAK ADA IMPORT PLUGIN NATIVE DI SINI BIAR VITE NGGAK ERROR BUILD 🔥
+
 import Home from './pages/Home';
 import Search from './pages/Search';
 import Artist from './pages/Artist';
@@ -15,7 +17,6 @@ import LibraryPage from './pages/Library';
 import Developer from './pages/Developer';
 import Television from './pages/Television';
 
-// 🔥 LOGO MASJID ESTETIK 🔥
 const MosqueIcon = ({ size = 24, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M12 2c-1.5 2.5-2.5 5-2.5 8.5V21h5v-10.5c0-3.5-1-6-2.5-8.5Z" />
@@ -31,19 +32,7 @@ const SILENT_MP3 = "data:audio/mp3;base64,//OExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqq
 const isNonMusic = (title) => {
   if (!title) return false;
   const t = title.toLowerCase();
-  const badWords = [
-      'podcast', 'vlog', 'tutorial', 'review', 'unboxing', 'reaction', 'react to',
-      'trailer', 'movie', 'episode', 'berita', 'gameplay', 'how to', 
-      'ceramah', 'pengajian', 'talkshow', 'interview', 'parody', 'parodi',
-      'ringtone', 'nada dering', 'sound effect', 'ngobrol', 'bincang', 'curhat',
-      'behind the scene', 'making of', 'teaser', 'q&a', 'qna', 'dokumenter', 
-      'bloopers', 'press conference', 'wawancara', 'story', 'cerita', 'prank', 
-      'challenge', 'di balik layar', 'reaction video', 'fungsi', 'fitur', 
-      'demo ', 'overview', 'guide', 'belajar', 'cara main', 'kelebihan', 
-      'spesifikasi', 'perbandingan', 'midi controller', 'yamaha', 'roland', 
-      'korg', 'casio', 'kupas tuntas', 'setting', 'pengaturan', 'alasan', 
-      'kenapa', 'mengapa', ' vs ', 'versus', 'tips', 'trick', 'trik', 'harga'
-  ];
+  const badWords = ['podcast', 'vlog', 'tutorial', 'review', 'unboxing', 'reaction', 'react to', 'trailer', 'movie', 'episode', 'berita', 'gameplay', 'how to', 'ceramah', 'pengajian', 'talkshow', 'interview', 'parody', 'parodi', 'ringtone', 'nada dering', 'sound effect', 'ngobrol', 'bincang', 'curhat', 'behind the scene', 'making of', 'teaser', 'q&a', 'qna', 'dokumenter', 'bloopers', 'press conference', 'wawancara', 'story', 'cerita', 'prank', 'challenge', 'di balik layar', 'reaction video', 'fungsi', 'fitur', 'demo ', 'overview', 'guide', 'belajar', 'cara main', 'kelebihan', 'spesifikasi', 'perbandingan', 'midi controller', 'yamaha', 'roland', 'korg', 'casio', 'kupas tuntas', 'setting', 'pengaturan', 'alasan', 'kenapa', 'mengapa', ' vs ', 'versus', 'tips', 'trick', 'trik', 'harga'];
   if (t.includes('cara ') && !t.includes('bicara') && !t.includes('cara lupakan')) return true;
   return badWords.some(w => t.includes(w)) || t.match(/\b(tes|test|unbox)\b/);
 };
@@ -52,14 +41,7 @@ const isBadMix = (title) => {
   if (!title) return false;
   if (isNonMusic(title)) return true;
   const t = title.toLowerCase();
-  const badMixWords = [
-      'full album', 'kompilasi', 'compilation', '1 jam', '2 jam', ' hours', ' hour',
-      'karaoke', 'instrumental', 'tanpa vokal', 'live at', 'live in', 'live performance',
-      'konser', 'concert', 'short', 'shorts', '8d', '8 d', 'sped up', 'slowed', 'reverb',
-      'kumpulan', 'terbaik', 'pilihan', 'nonstop', 'non stop', '2023', '2024', '2025', '2026', '2027', 
-      'hits tiktok', 'viral', 'dj ', 'remix', 'type beat', 'chords', 'lirik lagu', 'chord gitar',
-      'live session', 'live acoustic', 'cover', 'akustik', 'medley'
-  ];
+  const badMixWords = ['full album', 'kompilasi', 'compilation', '1 jam', '2 jam', ' hours', ' hour', 'karaoke', 'instrumental', 'tanpa vokal', 'live at', 'live in', 'live performance', 'konser', 'concert', 'short', 'shorts', '8d', '8 d', 'sped up', 'slowed', 'reverb', 'kumpulan', 'terbaik', 'pilihan', 'nonstop', 'non stop', '2023', '2024', '2025', '2026', '2027', 'hits tiktok', 'viral', 'dj ', 'remix', 'type beat', 'chords', 'lirik lagu', 'chord gitar', 'live session', 'live acoustic', 'cover', 'akustik', 'medley'];
   return badMixWords.some(w => t.includes(w));
 };
 
@@ -151,7 +133,6 @@ function MainApp() {
 
       if (nextSong) {
           const originalUrl = `${API_BASE}/api/audio?id=${nextSong.id}`;
-          
           fetch(originalUrl)
             .then(res => res.blob())
             .then(blob => {
@@ -248,6 +229,10 @@ function MainApp() {
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+                  
+                  if (typeof window !== 'undefined' && window.MusicControls) {
+                      window.MusicControls.updateIsPlaying(true);
+                  }
               }
           }
       } else {
@@ -276,6 +261,10 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
+          
+          if (typeof window !== 'undefined' && window.MusicControls) {
+              window.MusicControls.updateIsPlaying(false);
+          }
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -386,7 +375,7 @@ function MainApp() {
     }
   };
 
-  // 🔥 UPDATE MEDIA SESSION MURNI WEB API 🔥
+  // 🔥 UPDATE MEDIA SESSION & NATIVE WIDGET (TANPA ERROR VITE) 🔥
   const updateMediaSession = (song) => {
     if (!song) return;
     let a = song.artist || "Artis";
@@ -401,6 +390,7 @@ function MainApp() {
     }
     t = t.trim() || song.title;
 
+    // Untuk Browser Bawaan
     if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: t,
@@ -411,12 +401,43 @@ function MainApp() {
         navigator.mediaSession.playbackState = 'playing';
         document.title = `${t} - ${a}`;
     }
+
+    // 🔥 WIDGET NATIVE ANDROID: DENGAN PENCEGAH FORCE CLOSE 🔥
+    // Kita pastikan gambar cover BUKAN STRING KOSONG, kalau kosong Android akan force close.
+    const safeCoverImage = (song.image && song.image.length > 5 && song.image.includes('http')) 
+        ? song.image 
+        : 'https://ui-avatars.com/api/?name=RnC+Music&size=512&background=000&color=fff';
+
+    if (typeof window !== 'undefined' && window.MusicControls) {
+        try {
+            window.MusicControls.create({
+                track: t,
+                artist: a,
+                cover: safeCoverImage,
+                isPlaying: true,
+                dismissable: false,
+                hasPrev: true,
+                hasNext: true,
+                hasClose: false,
+                ticker: `Memutar: ${t}`
+            }, 
+            () => {
+               // Berhasil Dibuat
+               window.MusicControls.updateIsPlaying(true);
+            }, 
+            () => {
+               console.log('MusicControls Error');
+            });
+        } catch(err) { console.error(err); }
+    }
   };
 
   const handleNextLocal = (e) => {
       if (e) e.stopPropagation();
       if (dismissAdzanIfActive()) return; 
+
       isTransitioningRef.current = true;
+
       const st = usePlayerStore.getState();
       let nextIdx = st.currentIndex + 1;
       if (isShuffle) nextIdx = Math.floor(Math.random() * st.queue.length);
@@ -430,6 +451,7 @@ function MainApp() {
               active.play().finally(() => { isTransitioningRef.current = false; }).catch(()=>{ isTransitioningRef.current = false; });
           } else { isTransitioningRef.current = false; }
       } else { isTransitioningRef.current = false; }
+      
       st.playNext(isShuffle);
   };
 
@@ -454,6 +476,7 @@ function MainApp() {
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
+          if (typeof window !== 'undefined' && window.MusicControls) { window.MusicControls.updateIsPlaying(false); }
       } else {
           const active = getActiveAudio();
           if (active && currentSong && !active.src.includes(currentSong.id)) {
@@ -466,6 +489,7 @@ function MainApp() {
           }
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
           togglePlay();
+          if (typeof window !== 'undefined' && window.MusicControls) { window.MusicControls.updateIsPlaying(true); }
       }
   };
 
@@ -1035,6 +1059,31 @@ function MainApp() {
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
+
+    // 🔥 LISTENER PLUGIN NATIVE WIDGET 🔥
+    if (typeof window !== 'undefined' && window.MusicControls) {
+        try {
+            window.MusicControls.subscribe((action) => {
+                const message = typeof action === 'string' ? action : action.message;
+                switch(message) {
+                    case 'music-controls-next':
+                        handlersRef.current.next && handlersRef.current.next(null);
+                        break;
+                    case 'music-controls-previous':
+                        handlersRef.current.prev && handlersRef.current.prev(null);
+                        break;
+                    case 'music-controls-pause':
+                    case 'music-controls-play':
+                    case 'music-controls-toggle-play-pause':
+                        handlersRef.current.toggle && handlersRef.current.toggle(null);
+                        break;
+                    case 'music-controls-destroy':
+                        break;
+                }
+            });
+            window.MusicControls.listen();
+        } catch (e) { console.error("Error listener:", e); }
+    }
   }, []);
 
   const handleTimeUpdate = (e) => {
@@ -1087,6 +1136,7 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
+          if (typeof window !== 'undefined' && window.MusicControls) { window.MusicControls.updateIsPlaying(false); }
       }
   };
   
@@ -1116,6 +1166,7 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
+          if (typeof window !== 'undefined' && window.MusicControls) { window.MusicControls.updateIsPlaying(false); }
       }
   };
 
