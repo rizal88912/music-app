@@ -271,8 +271,8 @@ function MainApp() {
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
-                  // 🔥 NYALAKAN WIDGET NATIVE 🔥
-                  if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
+                  // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+                  // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
               }
           }
       } else {
@@ -301,8 +301,8 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
-          // 🔥 PAUSE WIDGET NATIVE 🔥
-          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -445,7 +445,8 @@ function MainApp() {
         document.title = `${t} - ${a}`;
     }
 
-    // 🔥 WIDGET NATIVE PLUGIN APK & PENCEGAH HP TIDUR 🔥
+    // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+    /*
     if (typeof window !== 'undefined' && window.MusicControls) {
         try {
             window.MusicControls.create({
@@ -462,6 +463,7 @@ function MainApp() {
             window.MusicControls.updateIsPlaying(true);
         } catch(err) { console.error("MusicControls Init Error:", err); }
     }
+    */
   };
 
   const handleNextLocal = (e) => {
@@ -1124,14 +1126,16 @@ function MainApp() {
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
-        if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+        // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+        // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
 
-    // 🔥 NATIVE PLUGIN LISTENER (TANGKAP PENCETAN WIDGET DARI HP) 🔥
+    // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+    /*
     if (typeof window !== 'undefined' && window.MusicControls) {
         window.MusicControls.subscribe((action) => {
             try {
@@ -1157,6 +1161,7 @@ function MainApp() {
         });
         window.MusicControls.listen();
     }
+    */
   }, []);
 
   useEffect(() => {
@@ -1215,8 +1220,8 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
-          // MATIKAN WIDGET JIKA ERROR
-          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
   };
   
@@ -1240,8 +1245,8 @@ function MainApp() {
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
-          // 🔥 HIDUPKAN WIDGET NATIVE 🔥
-          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
+          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
       }
   };
   
@@ -1250,8 +1255,8 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          // 🔥 PAUSE WIDGET NATIVE 🔥
-          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
+          // 🔥 DIMATIKAN SEMENTARA BUAT CEK FORCE CLOSE 🔥
+          // if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
   };
 
