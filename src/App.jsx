@@ -267,9 +267,12 @@ function MainApp() {
                   active.volume = 1;
                   active.loop = adzanOriginalLoopRef.current;
                   active.currentTime = adzanPausedTimeRef.current; 
+                  active.play().catch(()=>{});
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
+                  // 🔥 NYALAKAN WIDGET NATIVE 🔥
+                  if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
               }
           }
       } else {
@@ -298,6 +301,8 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
+          // 🔥 PAUSE WIDGET NATIVE 🔥
+          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -413,9 +418,9 @@ function MainApp() {
     }
   };
 
-  // 🔥 TAMBAHAN INJEKSI METADATA WIDGET 🔥
+  // 🔥 TAMBAHAN INJEKSI METADATA WIDGET & BACKGROUND NATIVE 🔥
   const updateMediaSession = (song) => {
-    if (!('mediaSession' in navigator) || !song) return;
+    if (!song) return;
     let a = song.artist || "Artis";
     a = a.replace(/vevo|official|topic|music|channel/gi, '').replace(/-/g, '').trim();
     if (!a || a.toLowerCase() === 'youtube') if (song.title && song.title.includes('-')) a = song.title.split('-')[0].replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
@@ -428,14 +433,35 @@ function MainApp() {
     }
     t = t.trim() || song.title;
 
-    // Paksa update UI widget iOS/Android
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: t,
-      artist: a,
-      album: 'RnCmusic Premium',
-      artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
-    });
-    navigator.mediaSession.playbackState = 'playing';
+    // Paksa update UI widget standar web
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: t,
+          artist: a,
+          album: 'RnCmusic Premium',
+          artwork: [{ src: song.image || 'https://via.placeholder.com/512', sizes: '512x512', type: 'image/jpeg' }]
+        });
+        navigator.mediaSession.playbackState = 'playing';
+        document.title = `${t} - ${a}`;
+    }
+
+    // 🔥 WIDGET NATIVE PLUGIN APK & PENCEGAH HP TIDUR 🔥
+    if (typeof window !== 'undefined' && window.MusicControls) {
+        try {
+            window.MusicControls.create({
+                track: t,
+                artist: a,
+                cover: song.image || '',
+                isPlaying: true,
+                dismissable: false,
+                hasPrev: true,
+                hasNext: true,
+                hasClose: false,
+                ticker: `Memutar: ${t}`
+            }, () => {}, () => {});
+            window.MusicControls.updateIsPlaying(true);
+        } catch(err) { console.error("MusicControls Init Error:", err); }
+    }
   };
 
   const handleNextLocal = (e) => {
@@ -1050,7 +1076,7 @@ function MainApp() {
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime, lyrics, activeLyricIndex, lyricOffset, isSyncMode, lyricsMode, isExpanded, activeTab]);
 
   const toggleRepeat = () => {
@@ -1098,10 +1124,38 @@ function MainApp() {
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
+        if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
+    }
+
+    // 🔥 NATIVE PLUGIN LISTENER (TANGKAP PENCETAN WIDGET DARI HP) 🔥
+    if (typeof window !== 'undefined' && window.MusicControls) {
+        window.MusicControls.subscribe((action) => {
+            try {
+                const message = JSON.parse(action).message;
+                switch(message) {
+                    case 'music-controls-next':
+                        handlersRef.current.next && handlersRef.current.next(null);
+                        break;
+                    case 'music-controls-previous':
+                        handlersRef.current.prev && handlersRef.current.prev(null);
+                        break;
+                    case 'music-controls-pause':
+                    case 'music-controls-play':
+                    case 'music-controls-toggle-play-pause':
+                        handlersRef.current.toggle && handlersRef.current.toggle(null);
+                        break;
+                    case 'music-controls-destroy':
+                        break;
+                    default:
+                        break;
+                }
+            } catch (e) {}
+        });
+        window.MusicControls.listen();
     }
   }, []);
 
@@ -1161,6 +1215,8 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
+          // MATIKAN WIDGET JIKA ERROR
+          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
   };
   
@@ -1184,6 +1240,8 @@ function MainApp() {
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
+          // 🔥 HIDUPKAN WIDGET NATIVE 🔥
+          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(true);
       }
   };
   
@@ -1192,6 +1250,8 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
+          // 🔥 PAUSE WIDGET NATIVE 🔥
+          if (typeof window !== 'undefined' && window.MusicControls) window.MusicControls.updateIsPlaying(false);
       }
   };
 
@@ -1595,7 +1655,7 @@ function MainApp() {
               }} 
               className={`transition-colors ${repeatMode !== 'off' ? 'text-[#3ea6ff]' : 'text-zinc-400 hover:text-white'}`}
             >
-              {repeatMode === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+              {repeatMode === 'one' ? <Repeat1 className="w-5 h-5 md:w-6 md:h-6" /> : <Repeat className="w-5 h-5 md:w-6 md:h-6" />}
             </button>
           </div>
         </div>
@@ -1803,8 +1863,8 @@ function MainApp() {
                                 </div>
                              ))}
                           </div>
-                       ) : relatedSongs.length > 0 ? (
-                          relatedSongs.map((song, idx) => (
+                       ) : (relatedSongs || []).length > 0 ? (
+                          (relatedSongs || []).map((song, idx) => (
                              <div 
                                 key={idx} 
                                 className="flex items-center gap-4 py-2 px-3 -mx-3 rounded-lg cursor-pointer group hover:bg-white/5 transition-colors" 
@@ -1897,7 +1957,7 @@ function MainApp() {
 
                {activeTab === 'lyrics' && (
                  <div className="flex flex-col min-h-full animate-in fade-in duration-300">
-                    {lyrics.length > 0 && !isLoadingLyrics && (
+                    {(lyrics || []).length > 0 && !isLoadingLyrics && (
                       <div className="sticky top-0 z-20 bg-[#121212] px-6 py-4 flex flex-col gap-4 border-b border-white/10 shadow-2xl">
                         <div className="flex justify-between items-center">
                           <div className="flex bg-white/5 rounded-full p-1 border border-white/10">
@@ -1936,10 +1996,10 @@ function MainApp() {
 
                     {isLoadingLyrics ? (
                       <div className="flex-1 flex items-center justify-center text-zinc-400 font-medium">Mencari lirik...</div>
-                    ) : lyrics.length > 0 ? (
+                    ) : (lyrics || []).length > 0 ? (
                       lyricsMode === 'synced' ? (
                         <div ref={lyricsContainerRef} className="flex-1 overflow-y-auto pb-[50vh] pt-[10vh] px-6 md:px-10 hide-scrollbar text-left md:text-center" style={{ maskImage: 'linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)' }}>
-                          {lyrics.map((line, index) => (
+                          {(lyrics || []).map((line, index) => (
                             <div key={index} className={`text-xl md:text-3xl font-bold mb-6 md:mb-8 transition-all duration-300 cursor-pointer ${isSyncMode ? 'hover:text-[#3ea6ff] text-zinc-500' : index === activeLyricIndex ? 'text-white scale-105 drop-shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
                               onClick={(e) => { e.stopPropagation(); if (isSyncMode) { setLyricOffset(currentTime - line.time); setIsSyncMode(false); } else { handleSeek({ target: { value: line.time + lyricOffset } }); } }}>
                               {line.text}
@@ -1949,7 +2009,7 @@ function MainApp() {
                       ) : (
                         <div className="flex-1 overflow-y-auto pb-[20vh] pt-[4vh] px-8 text-left hide-scrollbar">
                           <div className="flex flex-col gap-4">
-                            {lyrics.map((line, idx) => (
+                            {(lyrics || []).map((line, idx) => (
                               <p key={idx} className="text-base md:text-xl text-zinc-300 font-medium hover:text-white transition-colors">{line.text}</p>
                             ))}
                           </div>
@@ -2011,7 +2071,7 @@ function MainApp() {
 
 // 🔥 PINTU GERBANG VIP (LOGIN SCREEN) 🔥
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('rnc_vip_access') === 'true');
+  const [isAuthenticated, setIsAuthenticated] = useState(() => safeStorageGet('rnc_vip_access', false));
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
 
@@ -2029,7 +2089,7 @@ export default function App() {
     ];
 
     if (validCodes.includes(password.toLowerCase().trim())) {
-      localStorage.setItem('rnc_vip_access', 'true');
+      safeStorageSet('rnc_vip_access', true);
       setIsAuthenticated(true);
     } else {
       setError(true);
