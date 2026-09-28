@@ -8,9 +8,6 @@ import {
 } from 'lucide-react';
 import { usePlayerStore } from './store/usePlayerStore';
 
-// 🔥 NAMA IMPORT UDAH DIBENERIN JADI CapacitorMusicControls 🔥
-import { CapacitorMusicControls } from 'capacitor-music-controls-plugin';
-
 import Home from './pages/Home';
 import Search from './pages/Search';
 import Artist from './pages/Artist';
@@ -272,8 +269,6 @@ function MainApp() {
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
-                  // 🔥 WIDGET NATIVE 🔥
-                  try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err) {}
               }
           }
       } else {
@@ -302,8 +297,6 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
-          // 🔥 PAUSE WIDGET NATIVE 🔥
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err) {}
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -416,7 +409,7 @@ function MainApp() {
     }
   };
 
-  // 🔥 TAMBAHAN INJEKSI METADATA WIDGET & BACKGROUND NATIVE 🔥
+  // 🔥 UPDATE MEDIA SESSION MURNI WEB API 🔥
   const updateMediaSession = (song) => {
     if (!song) return;
     let a = song.artist || "Artis";
@@ -431,7 +424,7 @@ function MainApp() {
     }
     t = t.trim() || song.title;
 
-    // Paksa update UI widget standar web
+    // Ini udah cukup untuk bikin Lockscreen / Notifikasi di Webview Android!
     if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: t,
@@ -442,21 +435,6 @@ function MainApp() {
         navigator.mediaSession.playbackState = 'playing';
         document.title = `${t} - ${a}`;
     }
-
-    // 🔥 WIDGET NATIVE PLUGIN MODERN 🔥
-    try {
-        CapacitorMusicControls.create({
-            track: t,
-            artist: a,
-            cover: song.image || '',
-            isPlaying: true,
-            dismissable: false,
-            hasPrev: true,
-            hasNext: true,
-            hasClose: false,
-            ticker: `Memutar: ${t}`
-        }).catch(()=>{});
-    } catch(err) { console.error("MusicControls Init Error:", err); }
   };
 
   const handleNextLocal = (e) => {
@@ -511,7 +489,6 @@ function MainApp() {
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       } else {
           const active = getActiveAudio();
           if (active && currentSong && !active.src.includes(currentSong.id)) {
@@ -524,7 +501,6 @@ function MainApp() {
           }
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
           togglePlay();
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
       }
   };
 
@@ -1115,34 +1091,11 @@ function MainApp() {
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
-        try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
       navigator.mediaSession.setActionHandler('seekto', (details) => handlersRef.current.seek && handlersRef.current.seek({ target: { value: details.seekTime } }));
     }
-
-    // 🔥 LISTENER PLUGIN MUSIC MODERN 🔥
-    try {
-        CapacitorMusicControls.addListener('controlsNotification', (info) => {
-            const message = info.message || info;
-            switch(message) {
-                case 'music-controls-next':
-                    handlersRef.current.next && handlersRef.current.next(null);
-                    break;
-                case 'music-controls-previous':
-                    handlersRef.current.prev && handlersRef.current.prev(null);
-                    break;
-                case 'music-controls-pause':
-                case 'music-controls-play':
-                case 'music-controls-toggle-play-pause':
-                    handlersRef.current.toggle && handlersRef.current.toggle(null);
-                    break;
-                case 'music-controls-destroy':
-                    break;
-            }
-        });
-    } catch (e) {}
   }, []);
 
   useEffect(() => {
@@ -1201,7 +1154,6 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       }
   };
   
@@ -1223,7 +1175,6 @@ function MainApp() {
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
       }
   };
   
@@ -1232,7 +1183,6 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
       }
   };
 
