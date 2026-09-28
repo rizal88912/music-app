@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- TAMBAHAN xmlns:tools DI BAWAH INI WAJIB ADA -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:allowBackup="true"
@@ -10,10 +8,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
-
-        <!-- 🔥 OBAT ANTI ERROR MANIFEST MERGER (ANDROID 12+) 🔥 -->
-        <receiver android:name="com.homerz.cordova.musiccontrols.MusicControlsBroadcastReceiver" android:exported="true" tools:node="merge" />
-        <service android:name="com.homerz.cordova.musiccontrols.MusicControlsNotificationKiller" android:exported="false" tools:node="merge" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
@@ -49,10 +43,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     
-    <!-- Izin munculin widget di notifikasi (Wajib buat Android 13+) -->
+    <!-- Izin munculin widget di notifikasi -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Izin matiin penghemat baterai (Biar mesin auto-next gak dibunuh Infinix) -->
+    <!-- Izin matiin penghemat baterai -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
 </manifest>
