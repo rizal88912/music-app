@@ -91,6 +91,7 @@ function MainApp() {
   });
 
   const iframeRef = useRef(null);
+  
   const audioRef = useRef(null);
   const getActiveAudio = () => audioRef.current;
   
@@ -269,8 +270,8 @@ function MainApp() {
                   usePlayerStore.setState({ isPlaying: true });
                   showToast('▶️ Gas lagi! Waktu Adzan selesai.');
                   if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
-                  // 🔥 WIDGET NATIVE 🔥
-                  try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err) {}
+                  // WIDGET NATIVE
+                  try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }).catch(()=>{}); } catch(err) {}
               }
           }
       } else {
@@ -299,8 +300,8 @@ function MainApp() {
               }
           }
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.play().catch(()=>{});
-          // 🔥 PAUSE WIDGET NATIVE 🔥
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err) {}
+          // PAUSE WIDGET NATIVE
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }).catch(()=>{}); } catch(err) {}
       }
       showToast(isTest ? `🔊 Test: Waktu Adzan ${prayerName} Tiba! (10 Detik)` : `🕌 Waktu Adzan ${prayerName} tiba! Musik dijeda 5 menit.`);
       adzanEndTimeRef.current = Date.now() + (isTest ? 10000 : 300000);
@@ -439,19 +440,30 @@ function MainApp() {
         document.title = `${t} - ${a}`;
     }
 
+    // 🔥 FIX UTAMA: VALIDASI GAMBAR AGAR TIDAK FORCE CLOSE 🔥
+    // Android Native API akan Force Close jika menerima string kosong ('') pada parameter 'cover'
+    const safeCoverImage = (song.image && song.image.length > 5 && song.image.includes('http')) 
+        ? song.image 
+        : 'https://ui-avatars.com/api/?name=RnC+Music&size=512&background=000&color=fff';
+
     try {
         CapacitorMusicControls.create({
             track: t,
             artist: a,
-            cover: song.image || '',
+            cover: safeCoverImage,
             isPlaying: true,
             dismissable: false,
             hasPrev: true,
             hasNext: true,
             hasClose: false,
             ticker: `Memutar: ${t}`
-        }).catch((err) => console.log("MusicControls Warning:", err));
-    } catch(err) { console.log(err); }
+        }).then(() => {
+            // Update status *setelah* widget berhasil dibuat (menghindari tabrakan proses)
+            CapacitorMusicControls.updateIsPlaying({ isPlaying: true }).catch(()=>{});
+        }).catch((err) => console.log("MusicControls Create Error:", err));
+    } catch(err) { 
+        console.log("MusicControls Exception:", err); 
+    }
   };
 
   const handleNextLocal = (e) => {
@@ -506,7 +518,7 @@ function MainApp() {
           if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
           togglePlay();
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }).catch(()=>{}); } catch(err){}
       } else {
           const active = getActiveAudio();
           if (active && currentSong && !active.src.includes(currentSong.id)) {
@@ -519,7 +531,7 @@ function MainApp() {
           }
           if (mediaMode === 'video') iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
           togglePlay();
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }).catch(()=>{}); } catch(err){}
       }
   };
 
@@ -1110,7 +1122,7 @@ function MainApp() {
         if (active) active.pause();
         if (keepAliveAudioRef.current) keepAliveAudioRef.current.pause();
         usePlayerStore.setState({ isPlaying: false });
-        try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
+        try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }).catch(()=>{}); } catch(err){}
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => handlersRef.current.prev && handlersRef.current.prev(null));
       navigator.mediaSession.setActionHandler('nexttrack', () => handlersRef.current.next && handlersRef.current.next(null));
@@ -1119,6 +1131,7 @@ function MainApp() {
 
     // 🔥 LISTENER PLUGIN NATIVE WIDGET 🔥
     try {
+        let listenerHandle = null;
         CapacitorMusicControls.addListener('controlsNotification', (info) => {
             const message = info.message || info;
             switch(message) {
@@ -1136,9 +1149,19 @@ function MainApp() {
                 case 'music-controls-destroy':
                     break;
             }
-        });
+        }).then(handle => { listenerHandle = handle; }).catch(()=>{});
+        
+        return () => {
+            if (listenerHandle) listenerHandle.remove();
+        };
     } catch (e) {}
   }, []);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
 
   const handleTimeUpdate = (e) => {
       if (e.target !== getActiveAudio()) return;
@@ -1190,7 +1213,7 @@ function MainApp() {
           setIsBuffering(false);
           usePlayerStore.setState({ isPlaying: false });
           showToast("❌ Sinyal audio terputus. Ketuk Play untuk mengulang.");
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }).catch(()=>{}); } catch(err){}
       }
   };
   
@@ -1212,7 +1235,7 @@ function MainApp() {
           if (keepAliveAudioRef.current && keepAliveAudioRef.current.paused) {
               keepAliveAudioRef.current.play().catch(()=>{});
           }
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }); } catch(err){}
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: true }).catch(()=>{}); } catch(err){}
       }
   };
   
@@ -1221,7 +1244,7 @@ function MainApp() {
       if (isTransitioningRef.current) return; 
       if (!isAdzanPlayingRef.current) {
           usePlayerStore.setState({ isPlaying: false });
-          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }); } catch(err){}
+          try { CapacitorMusicControls.updateIsPlaying({ isPlaying: false }).catch(()=>{}); } catch(err){}
       }
   };
 
@@ -2050,7 +2073,7 @@ export default function App() {
 
     // 🔥 Minta Izin Notifikasi Sebelum Mulai 🔥
     if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
-        Notification.requestPermission();
+        Notification.requestPermission().catch(()=>{});
     }
     
     const date = new Date();
